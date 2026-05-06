@@ -1,0 +1,17 @@
+apiVersion: v2
+name: ticketcraft
+description: A Helm chart for TicketCraft - AI-powered Jira ticket refinement and quality improvement
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - ticketcraft
+  - jira
+  - ai
+  - gemini
+  - ticket-quality
+  - mcp
+home: https://github.com/osabach/ticketcraft
+maintainers:
+  - name: Omer Sabach
+    email: osabach@redhat.com

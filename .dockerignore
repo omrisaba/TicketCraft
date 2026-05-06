@@ -1,0 +1,12 @@
+node_modules/
+server/node_modules/
+client/node_modules/
+shared/node_modules/
+dist/
+server/data/
+server/certs/
+.env
+*.log
+.git/
+.vscode/
+.idea/

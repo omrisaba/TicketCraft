@@ -1,0 +1,22 @@
+{
+  "name": "ticketcraft",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TicketCraft — AI-powered Jira ticket quality improvement with scoring, guided questions, and seamless sync",
+  "workspaces": [
+    "server",
+    "client",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "npm run dev --workspace=server",
+    "dev:client": "npm run dev --workspace=client",
+    "build": "npm run build --workspace=shared && npm run build --workspace=server && npm run build --workspace=client",
+    "generate-certs": "bash scripts/generate-certs.sh"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,140 @@
+# Default values for ticketcraft
+replicaCount: 1
+
+image:
+  repository: ticketcraft
+  pullPolicy: Always
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+# Pod security context
+# Note: Do NOT set fsGroup or runAsUser for OpenShift deployments
+# OpenShift assigns these from the namespace's SCC range
+podSecurityContext: {}
+
+# Container security context
+securityContext: {}
+
+service:
+  type: ClusterIP
+  port: 3001
+  targetPort: 3001
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: ticketcraft.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  limits:
+    cpu: "1"
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# =============================================================================
+# ENVIRONMENT CONFIGURATION
+# =============================================================================
+# Admin-level settings shared by all users. Per-user credentials (Jira email,
+# Jira API token, GitHub/GitLab tokens) are provided at login and stored
+# in-memory only — never on the server.
+# =============================================================================
+
+env:
+  # Gemini API key (required, admin-level)
+  GEMINI_API_KEY: ""
+  # Default Gemini model
+  GEMINI_DEFAULT_MODEL: "gemini-3.1-pro-preview"
+  # Jira Cloud base URL (required)
+  JIRA_BASE_URL: ""
+  # Server ports
+  PORT: "3001"
+  HTTP_PORT: "3000"
+  HOST: "0.0.0.0"
+  # Session timeout (30 min default)
+  SESSION_TIMEOUT_MS: "1800000"
+  # Rate limit per 15-minute window
+  RATE_LIMIT_MAX: "500"
+  # Automation labels
+  AUTOMATION_TRIGGER_LABEL: "readyForTicketCraftRefinement"
+  AUTOMATION_DONE_LABEL: "processedByTicketCraft"
+
+# Sensitive env vars loaded from a Kubernetes Secret
+# Set secretName to an existing secret containing GEMINI_API_KEY
+envSecret:
+  enabled: false
+  secretName: "ticketcraft-secrets"
+  keys:
+    - GEMINI_API_KEY
+
+# TLS certificates for HTTPS
+tls:
+  enabled: false
+  # Name of a secret containing tls.crt and tls.key
+  secretName: "ticketcraft-tls-certs"
+
+# Persistent storage for drafts, history, automation results, admin settings
+persistence:
+  enabled: true
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  annotations: {}
+
+# Health check configuration
+healthCheck:
+  enabled: true
+  path: /api/health
+  initialDelaySeconds: 15
+  periodSeconds: 30
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 3
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# Network policies
+networkPolicy:
+  enabled: false
+  ingress: []
+  egress: []
+
+# OpenShift Route configuration (alternative to Ingress)
+route:
+  enabled: false
+  host: ""
+  annotations: {}
+  termination: edge
+  insecureEdgeTerminationPolicy: Redirect

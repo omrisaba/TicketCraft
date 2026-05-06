@@ -1,0 +1,36 @@
+node_modules/
+dist/
+.env
+!.env.example
+*.local
+
+# TLS certificates
+server/certs/*.key
+server/certs/*.crt
+server/certs/*.pem
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test / tooling output
+coverage/
+.nyc_output/
+*.tsbuildinfo
+.eslintcache
+
+# Bundler / dev caches (safe to regenerate)
+.cache/
+.vite/
+.parcel-cache/
+.turbo/
+
+# Draft storage
+server/data/
