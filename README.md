@@ -127,3 +127,7 @@ TicketCraft/
 - Gemini 3.1 Flash
 - Gemini 3.0 Pro
 - Gemini 3.0 Flash
+
+## License
+
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE).
