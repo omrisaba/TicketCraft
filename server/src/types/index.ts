@@ -10,6 +10,7 @@ export interface RequestCredentials {
   jiraBaseUrl: string;
   githubToken?: string;
   gitlabToken?: string;
+  cursorApiKey?: string;
 }
 
 export interface AuthenticatedRequest extends Request {

@@ -189,8 +189,13 @@ export class AIController {
     },
   ) {
     const admin = await AdminStore.load();
-    if (!admin.cursorEnabled || !admin.cursorApiKey) {
-      throw new AppError(400, 'CURSOR_DISABLED', 'Cursor integration is not enabled. Configure it in admin settings.');
+    if (!admin.cursorEnabled) {
+      throw new AppError(400, 'CURSOR_DISABLED', 'Cursor integration is not enabled by the administrator.');
+    }
+
+    const creds = getCredentials(req);
+    if (!creds.cursorApiKey) {
+      throw new AppError(400, 'CURSOR_NO_API_KEY', 'Provide your Cursor API key in credentials to use Cursor.');
     }
 
     if (!repoUrl) {
@@ -198,19 +203,17 @@ export class AIController {
     }
 
     if (cursorActiveCount >= admin.cursorMaxConcurrent) {
-      // Fallback to Gemini
-      const { geminiApiKey, geminiModel, geminiTemperature } = getCredentials(req);
+      const { geminiApiKey, geminiModel, geminiTemperature } = creds;
       const ai = new GeminiAdapter(geminiApiKey, geminiModel, geminiTemperature);
       const result = await ai.improveTicket(ticket, options);
       return { ...result, cursorFallback: true, codeInsights: null };
     }
 
-    const creds = getCredentials(req);
     const parsed = RepoService.parseRepoUrl(repoUrl);
     const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
 
     const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
-    const cursor = new CursorAdapter(admin.cursorApiKey, admin.cursorModel, repoDir);
+    const cursor = new CursorAdapter(creds.cursorApiKey!, admin.cursorModel, repoDir);
     const gemini = this.getAI(req);
 
     cursorActiveCount++;
@@ -288,8 +291,12 @@ export class AIController {
     },
   ) {
     const admin = await AdminStore.load();
-    if (!admin.cursorEnabled || !admin.cursorApiKey) {
-      throw new AppError(400, 'CURSOR_DISABLED', 'Cursor integration is not enabled.');
+    if (!admin.cursorEnabled) {
+      throw new AppError(400, 'CURSOR_DISABLED', 'Cursor integration is not enabled by the administrator.');
+    }
+    const creds = getCredentials(req);
+    if (!creds.cursorApiKey) {
+      throw new AppError(400, 'CURSOR_NO_API_KEY', 'Provide your Cursor API key in credentials to use Cursor.');
     }
     if (!repoUrl) {
       throw new AppError(400, 'CURSOR_NO_REPO', 'Cursor requires a connected repository.');
@@ -299,11 +306,10 @@ export class AIController {
       const result = await ai.composeTicket(freeText, options);
       return { ...result, cursorFallback: true, codeInsights: null };
     }
-    const creds = getCredentials(req);
     const parsed = RepoService.parseRepoUrl(repoUrl);
     const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
     const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
-    const cursor = new CursorAdapter(admin.cursorApiKey, admin.cursorModel, repoDir);
+    const cursor = new CursorAdapter(creds.cursorApiKey!, admin.cursorModel, repoDir);
     const gemini = this.getAI(req);
 
     cursorActiveCount++;
@@ -384,8 +390,12 @@ export class AIController {
     },
   ) {
     const admin = await AdminStore.load();
-    if (!admin.cursorEnabled || !admin.cursorApiKey) {
-      throw new AppError(400, 'CURSOR_DISABLED', 'Cursor integration is not enabled.');
+    if (!admin.cursorEnabled) {
+      throw new AppError(400, 'CURSOR_DISABLED', 'Cursor integration is not enabled by the administrator.');
+    }
+    const creds = getCredentials(req);
+    if (!creds.cursorApiKey) {
+      throw new AppError(400, 'CURSOR_NO_API_KEY', 'Provide your Cursor API key in credentials to use Cursor.');
     }
     if (!repoUrl) {
       throw new AppError(400, 'CURSOR_NO_REPO', 'Cursor requires a connected repository.');
@@ -394,11 +404,10 @@ export class AIController {
       const ai = this.getAI(req);
       return ai.breakdownTicket(ticket, options);
     }
-    const creds = getCredentials(req);
     const parsed = RepoService.parseRepoUrl(repoUrl);
     const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
     const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
-    const cursor = new CursorAdapter(admin.cursorApiKey, admin.cursorModel, repoDir);
+    const cursor = new CursorAdapter(creds.cursorApiKey!, admin.cursorModel, repoDir);
     const gemini = this.getAI(req);
 
     cursorActiveCount++;

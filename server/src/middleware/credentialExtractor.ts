@@ -18,6 +18,7 @@ export function credentialExtractor(
   const tempHeader = req.headers['x-gemini-temperature'] as string | undefined;
   const githubToken = req.headers['x-github-token'] as string | undefined;
   const gitlabToken = req.headers['x-gitlab-token'] as string | undefined;
+  const cursorApiKey = req.headers['x-cursor-api-key'] as string | undefined;
 
   const errors: string[] = [];
 
@@ -57,6 +58,7 @@ export function credentialExtractor(
     jiraBaseUrl: config.jira.baseUrl,
     ...(githubToken?.trim() && { githubToken: githubToken.trim() }),
     ...(gitlabToken?.trim() && { gitlabToken: gitlabToken.trim() }),
+    ...(cursorApiKey?.trim() && { cursorApiKey: cursorApiKey.trim() }),
   };
 
   next();

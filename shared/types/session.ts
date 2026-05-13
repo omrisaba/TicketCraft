@@ -4,6 +4,7 @@ export interface SessionCredentials {
   jiraApiToken: string;
   githubToken?: string;
   gitlabToken?: string;
+  cursorApiKey?: string;
 }
 
 export type GeminiModel =

@@ -14,8 +14,7 @@ const DEFAULTS: AdminSettings = {
   gitlabMcpUrl: '',
   mcpMaxRounds: 5,
   mcpMaxToolCalls: 10,
-  cursorEnabled: false,
-  cursorApiKey: '',
+  cursorEnabled: true,
   cursorModel: 'auto',
   cursorMaxConcurrent: 8,
 };

@@ -15,6 +15,7 @@ const CREDENTIAL_TEMPLATE = {
   jiraApiToken: 'your-jira-api-token',
   githubToken: '',
   gitlabToken: '',
+  cursorApiKey: '',
 };
 
 function downloadTemplate() {
@@ -38,6 +39,7 @@ export function SessionStart() {
   const [jiraApiToken, setJiraApiToken] = useState('');
   const [githubToken, setGithubToken] = useState('');
   const [gitlabToken, setGitlabToken] = useState('');
+  const [cursorApiKey, setCursorApiKey] = useState('');
   const [geminiModel, setGeminiModel] = useState<GeminiModel | ''>('');
   const [loading, setLoading] = useState(false);
   const [configLoading, setConfigLoading] = useState(true);
@@ -88,6 +90,7 @@ export function SessionStart() {
         setJiraApiToken(parsed.jiraApiToken || '');
         setGithubToken(parsed.githubToken || '');
         setGitlabToken(parsed.gitlabToken || '');
+        setCursorApiKey(parsed.cursorApiKey || '');
         setFileLoaded(true);
       } catch {
         setError('Invalid JSON file. Please check the format and try again.');
@@ -121,6 +124,7 @@ export function SessionStart() {
         jiraApiToken,
         ...(githubToken.trim() && { githubToken: githubToken.trim() }),
         ...(gitlabToken.trim() && { gitlabToken: gitlabToken.trim() }),
+        ...(cursorApiKey.trim() && { cursorApiKey: cursorApiKey.trim() }),
       };
 
       setApiCredentials(creds);
@@ -145,10 +149,10 @@ export function SessionStart() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4">
-      <div className="w-full max-w-lg">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600 text-white mb-4">
-            <Zap className="w-8 h-8" />
+      <div className="w-full max-w-xl">
+        <div className="text-center mb-4">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-600 text-white mb-2">
+            <Zap className="w-6 h-6" />
           </div>
           <h1 className="text-3xl font-bold text-gray-900">TicketCraft</h1>
           <p className="text-gray-500 mt-2">AI-powered Jira ticket quality improvement</p>
@@ -161,7 +165,7 @@ export function SessionStart() {
 
         <Card padding="lg">
           {/* Login method tabs */}
-          <div className="flex border-b border-gray-200 mb-5">
+          <div className="flex border-b border-gray-200 mb-4">
             <button
               type="button"
               onClick={() => { setLoginTab('manual'); setError(null); }}
@@ -188,7 +192,7 @@ export function SessionStart() {
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-4">
             {loginTab === 'file' && (
               <div className="space-y-4">
                 <p className="text-sm text-gray-600">
@@ -259,7 +263,7 @@ export function SessionStart() {
                   />
                 </div>
 
-                <div className="border-t border-gray-200 pt-5 space-y-4">
+                <div className="border-t border-gray-200 pt-3 space-y-3">
                   <h2 className="text-lg font-semibold text-gray-800">Repository Tokens
                     <span className="text-xs font-normal text-gray-400 ml-2">optional</span>
                   </h2>
@@ -281,6 +285,35 @@ export function SessionStart() {
                     onChange={(e) => setGitlabToken(e.target.value)}
                   />
                 </div>
+
+                {appConfig?.cursorEnabled && (
+                  <div className="border-t border-gray-200 pt-3 space-y-3">
+                    <h2 className="text-lg font-semibold text-gray-800">Cursor Integration
+                      <span className="text-xs font-normal text-gray-400 ml-2">optional</span>
+                    </h2>
+                    <p className="text-xs text-gray-500 -mt-2">
+                      Provide your Cursor API key to enable codebase-aware ticket analysis.
+                    </p>
+                    <Input
+                      label="Cursor API Key"
+                      isSecret
+                      placeholder="cursor_..."
+                      value={cursorApiKey}
+                      onChange={(e) => setCursorApiKey(e.target.value)}
+                    />
+                    <p className="text-[11px] text-gray-400">
+                      Get your key from{' '}
+                      <a
+                        href="https://cursor.com/dashboard/integrations"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-500 hover:underline"
+                      >
+                        cursor.com/dashboard/integrations
+                      </a>.
+                    </p>
+                  </div>
+                )}
               </>
             )}
 
@@ -296,12 +329,14 @@ export function SessionStart() {
                   <span className="text-gray-800">{githubToken ? '••••••••' : '(not set)'}</span>
                   <span className="text-gray-500">GitLab Token</span>
                   <span className="text-gray-800">{gitlabToken ? '••••••••' : '(not set)'}</span>
+                  <span className="text-gray-500">Cursor API Key</span>
+                  <span className="text-gray-800">{cursorApiKey ? '••••••••' : '(not set)'}</span>
                 </div>
               </div>
             )}
 
             {appConfig && (
-              <div className="border-t border-gray-200 pt-5 space-y-4">
+              <div className="border-t border-gray-200 pt-3 space-y-3">
                 <h2 className="text-lg font-semibold text-gray-800">AI Model</h2>
                 <Select
                   label="Gemini Model"
@@ -318,11 +353,10 @@ export function SessionStart() {
               </div>
             )}
 
-            <div className="flex items-start gap-2 text-xs text-gray-500 bg-gray-50 rounded-lg p-3">
-              <Shield className="w-4 h-4 mt-0.5 shrink-0 text-gray-400" />
+            <div className="flex items-start gap-2 text-xs text-gray-500 bg-gray-50 rounded-lg p-2.5">
+              <Shield className="w-3.5 h-3.5 mt-0.5 shrink-0 text-gray-400" />
               <p>
-                All credentials are stored only in memory for this session.
-                They are never saved to disk, local storage, or any server. Closing this tab will erase everything.
+                All credentials are stored only in memory for this session. They are never saved to disk, local storage, or any server. Closing this tab will erase everything.
               </p>
             </div>
 

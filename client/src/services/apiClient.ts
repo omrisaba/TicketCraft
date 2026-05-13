@@ -54,6 +54,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers['X-Gemini-Temperature'] = String(currentTemperature);
     if (currentCredentials.githubToken) headers['X-Github-Token'] = currentCredentials.githubToken;
     if (currentCredentials.gitlabToken) headers['X-Gitlab-Token'] = currentCredentials.gitlabToken;
+    if (currentCredentials.cursorApiKey) headers['X-Cursor-Api-Key'] = currentCredentials.cursorApiKey;
   }
 
   const timeoutMs = LONG_RUNNING_PATHS.some((p) => path.startsWith(p))
@@ -185,6 +186,7 @@ export const api = {
         headers['X-Gemini-Temperature'] = String(currentTemperature);
         if (currentCredentials.githubToken) headers['X-Github-Token'] = currentCredentials.githubToken;
         if (currentCredentials.gitlabToken) headers['X-Gitlab-Token'] = currentCredentials.gitlabToken;
+        if (currentCredentials.cursorApiKey) headers['X-Cursor-Api-Key'] = currentCredentials.cursorApiKey;
       }
       const response = await fetch('/api/repo/upload-files', {
         method: 'POST',

@@ -141,13 +141,67 @@ Once you're happy with the improvements:
 
 ---
 
-## 5. Additional Features
+## 5. Create from Scratch (Compose Workspace)
 
-### 5.1 Linked Ticket Context
+TicketCraft lets you create brand new Jira tickets from a rough description — no existing ticket required. After logging in, use the **Improve Existing / Create from Scratch** toggle at the top of the page to switch to the Compose Workspace.
+
+### 5.1 Setup
+
+1. **Describe the work** — write a free-text description of what needs to be done. This can be rough notes, a chat message, or a bullet list — the AI will transform it into a structured ticket.
+2. **Project** — search and select the target Jira project.
+3. **Issue Type** — choose from the available types (e.g., Story, Bug, Task). Sub-task types are excluded here since this creates a top-level ticket.
+4. **Detail Level** — set to High, Medium, or Low to control how verbose the generated ticket will be.
+5. **Assignee** *(optional)* — search for a user in the selected project and assign them to the ticket.
+6. **Template** *(optional)* — select a template (Bug, Feature, Spike, Tech Debt) to guide the structure of the generated ticket.
+7. **Repository** *(optional)* — connect a GitHub or GitLab repository for code-aware generation.
+8. **Reference Files** *(optional)* — add URLs or upload local files as additional context for the AI.
+
+Click **Generate Ticket** to submit.
+
+### 5.2 Review the Generated Ticket
+
+After the AI generates the ticket, you land on the **Review** step where you can:
+
+- **Edit** the summary, description, and acceptance criteria directly in the form
+- See the suggested **labels** and **story points**
+- Confirm the project and issue type
+
+From here you have several options:
+
+- **Back** — return to setup to change your description or settings
+- **Regenerate** — re-run the AI to get a fresh version
+- **Create Ticket** — create the ticket in Jira immediately
+- **Break Down into Tasks** — split the ticket into subtasks before creating (see below)
+
+### 5.3 Break Down into Tasks
+
+Click **Break Down into Tasks** to have the AI decompose the ticket into implementable subtasks. The breakdown step shows:
+
+- **Parent ticket** — the composed ticket that will become the parent
+- **Subtask list** — each with a summary, description, acceptance criteria, labels, and story points
+- **Rationale** — the AI's explanation of how it divided the work
+- **Story point totals** — compared against the parent's estimate
+
+You can reorder, edit, add, or remove subtasks before creating. Click **Create All (N tickets)** to batch-create the parent ticket and all subtasks in Jira in one operation.
+
+### 5.4 Done
+
+After creation, TicketCraft shows:
+
+- **Single ticket** — a link to the newly created Jira issue
+- **Batch (parent + subtasks)** — links to the parent and each subtask, plus any errors if some subtasks failed to create
+
+Click **Create Another Ticket** to start a fresh composition.
+
+---
+
+## 6. Additional Features
+
+### 6.1 Linked Ticket Context
 
 When fetching a ticket, TicketCraft automatically retrieves up to 5 linked tickets (parent, subtasks, related issues). This context is passed to the AI so improvements account for the broader work context — avoiding duplication and ensuring consistency with related tickets.
 
-### 5.2 Repository Context
+### 6.2 Repository Context
 
 Connect a source code repository to give the AI awareness of your codebase:
 
@@ -157,11 +211,11 @@ Connect a source code repository to give the AI awareness of your codebase:
 
 This context makes improvements more technically accurate — the AI can reference actual code structure, naming conventions, and architecture in its suggestions.
 
-### 5.3 Reference Links
+### 6.3 Reference Links
 
 Add external URLs (documentation pages, design docs, RFCs) to the **Reference Links** panel. TicketCraft fetches the content from these URLs and includes it in the AI prompts. This is useful when a ticket references external requirements or specifications.
 
-### 5.4 Ticket Scanner (Pending Reviews)
+### 6.4 Ticket Scanner (Pending Reviews)
 
 The Ticket Scanner lets you batch-process multiple tickets:
 
@@ -171,7 +225,7 @@ The Ticket Scanner lets you batch-process multiple tickets:
 
 This is useful for sprint grooming or backlog refinement sessions.
 
-### 5.5 Automation
+### 6.5 Automation
 
 TicketCraft supports label-driven automation for hands-off refinement:
 
@@ -180,25 +234,25 @@ TicketCraft supports label-driven automation for hands-off refinement:
 
 Ask your administrator about the specific labels configured for your instance.
 
-### 5.6 Session History
+### 6.6 Session History
 
 The header displays a **History** dropdown listing all tickets you've improved during the current session. Click any entry to revisit its score and improvements. History is persisted on the server, so it survives page refreshes within the same session.
 
-### 5.7 Drafts
+### 6.7 Drafts
 
 TicketCraft auto-saves your work as you go. If you navigate away or your session times out mid-improvement, the next time you load the same ticket, you'll be offered the option to **resume from your draft** or start fresh.
 
-### 5.8 Ticket Graph
+### 6.8 Ticket Graph
 
 The **Ticket Map** provides a visual graph of the current ticket's relationships — parent, subtasks, and linked issues — rendered as an interactive node diagram. Click any node to navigate to that ticket.
 
-### 5.9 Create New Ticket
+### 6.9 Create New Ticket
 
 From the improvement view, click **Create New** to open a modal that lets you create a brand new Jira issue populated with the improved content. Choose the project, issue type, and other fields before submitting.
 
 ---
 
-## 6. Security and Privacy
+## 7. Security and Privacy
 
 - **No credential storage.** Your Jira email and API token exist only in browser memory during the active session. They are never written to the server's disk, database, cookies, or localStorage.
 - **Encrypted transport.** All communication between your browser and TicketCraft uses HTTPS.
@@ -208,7 +262,7 @@ From the improvement view, click **Create New** to open a modal that lets you cr
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 ### "Invalid Jira credentials"
 
@@ -236,7 +290,7 @@ From the improvement view, click **Create New** to open a modal that lets you cr
 
 ---
 
-## 8. Glossary
+## 9. Glossary
 
 | Term | Definition |
 |---|---|
