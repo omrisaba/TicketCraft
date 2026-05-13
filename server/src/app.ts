@@ -21,6 +21,10 @@ import { historyRouter } from './routes/history.routes.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
+if (config.trustProxy) {
+  app.set('trust proxy', 1);
+}
+
 app.use(securityHeaders);
 app.use(cors(config.cors));
 app.use(rateLimiter);

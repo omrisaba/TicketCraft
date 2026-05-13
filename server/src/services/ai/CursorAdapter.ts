@@ -52,43 +52,56 @@ export class CursorAdapter {
       },
     });
 
-    try {
-      const result = await Agent.prompt(prompt, {
-        apiKey: this.apiKey,
-        model: { id: this.model },
-        local: { cwd: this.repoDir },
-      });
+    const maxAttempts = 2;
 
-      const duration = Date.now() - start;
-      const text = result.result || '';
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const result = await Agent.prompt(prompt, {
+          apiKey: this.apiKey,
+          model: { id: this.model },
+          local: { cwd: this.repoDir },
+        });
 
-      logBuffer.add({
-        category: 'llm',
-        operation: 'cursorImprove:done',
-        model: `cursor:${this.model}`,
-        durationMs: duration,
-        responseLength: text.length,
-        success: result.status === 'finished',
-        meta: { status: result.status },
-      });
+        const duration = Date.now() - start;
+        const text = result.result || '';
 
-      if (result.status !== 'finished') {
-        throw new Error(`Cursor agent did not finish successfully (status: ${result.status})`);
+        logBuffer.add({
+          category: 'llm',
+          operation: 'cursorImprove:done',
+          model: `cursor:${this.model}`,
+          durationMs: duration,
+          responseLength: text.length,
+          success: result.status === 'finished',
+          meta: { status: result.status, attempt },
+        });
+
+        if (result.status !== 'finished') {
+          throw new Error(`Cursor agent did not finish successfully (status: ${result.status})`);
+        }
+
+        if (!text) {
+          throw new Error('Cursor agent returned empty response');
+        }
+
+        return this.parseResult(text, ticket);
+      } catch (err: any) {
+        const duration = Date.now() - start;
+        logBuffer.add({
+          category: 'llm',
+          operation: 'cursorImprove:error',
+          model: `cursor:${this.model}`,
+          durationMs: duration,
+          success: false,
+          error: err?.message,
+          meta: { attempt },
+        });
+
+        if (attempt >= maxAttempts) throw err;
+        console.log(`[CURSOR] Attempt ${attempt} failed (${err.message}), retrying...`);
       }
-
-      return this.parseResult(text, ticket);
-    } catch (err: any) {
-      const duration = Date.now() - start;
-      logBuffer.add({
-        category: 'llm',
-        operation: 'cursorImprove:error',
-        model: `cursor:${this.model}`,
-        durationMs: duration,
-        success: false,
-        error: err?.message,
-      });
-      throw err;
     }
+
+    throw new Error('Cursor agent failed after all attempts');
   }
 
   private buildPrompt(
@@ -208,8 +221,24 @@ Respond with ONLY this JSON — no explanation before or after:
   }
 
   private parseResult(text: string, ticket: Ticket): CursorImproveResult {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    let cleaned = text.trim();
+
+    const codeBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      cleaned = codeBlockMatch[1].trim();
+    }
+
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
+      logBuffer.add({
+        category: 'llm',
+        operation: 'cursorImprove:parseError',
+        model: `cursor:${this.model}`,
+        durationMs: 0,
+        success: false,
+        error: 'No JSON object found in response',
+        meta: { responsePreview: text.slice(0, 500) },
+      });
       throw new Error('Cursor agent did not return valid JSON');
     }
 
@@ -230,6 +259,15 @@ Respond with ONLY this JSON — no explanation before or after:
         mermaidDiagrams: [],
       };
     } catch {
+      logBuffer.add({
+        category: 'llm',
+        operation: 'cursorImprove:parseError',
+        model: `cursor:${this.model}`,
+        durationMs: 0,
+        success: false,
+        error: 'JSON.parse failed',
+        meta: { responsePreview: jsonMatch[0].slice(0, 500) },
+      });
       throw new Error('Failed to parse Cursor agent JSON response');
     }
   }

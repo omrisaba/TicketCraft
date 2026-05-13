@@ -7,6 +7,7 @@ export const config = {
   port: parseInt(process.env.PORT || '3001', 10),
   httpPort: parseInt(process.env.HTTP_PORT || '3000', 10),
   host: process.env.HOST || '0.0.0.0',
+  trustProxy: process.env.TRUST_PROXY === 'true',
 
   cors: {
     origin: process.env.CORS_ORIGIN || true,

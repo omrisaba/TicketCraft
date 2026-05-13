@@ -22,6 +22,10 @@ export function updateApiTemperature(temp: number) {
   currentTemperature = temp;
 }
 
+const LONG_RUNNING_PATHS = ['/api/ai/improve', '/api/ai/refine', '/api/ai/enrich'];
+const DEFAULT_TIMEOUT_MS = 60_000;
+const LONG_TIMEOUT_MS = 600_000;
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -37,22 +41,43 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     if (currentCredentials.gitlabToken) headers['X-Gitlab-Token'] = currentCredentials.gitlabToken;
   }
 
-  const response = await fetch(path, {
-    ...options,
-    headers,
-  });
+  const timeoutMs = LONG_RUNNING_PATHS.some((p) => path.startsWith(p))
+    ? LONG_TIMEOUT_MS
+    : DEFAULT_TIMEOUT_MS;
 
-  const data: ApiResponse<T> = await response.json();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (!data.success || data.error) {
-    throw new ApiClientError(
-      data.error?.message || 'Unknown error',
-      data.error?.code || 'UNKNOWN',
-      response.status,
-    );
+  try {
+    const response = await fetch(path, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+
+    const data: ApiResponse<T> = await response.json();
+
+    if (!data.success || data.error) {
+      throw new ApiClientError(
+        data.error?.message || 'Unknown error',
+        data.error?.code || 'UNKNOWN',
+        response.status,
+      );
+    }
+
+    return data.data as T;
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new ApiClientError(
+        'Request timed out. The operation is taking longer than expected — please try again.',
+        'TIMEOUT',
+        408,
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return data.data as T;
 }
 
 export class ApiClientError extends Error {
