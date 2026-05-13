@@ -10,7 +10,9 @@ export const config = {
   trustProxy: process.env.TRUST_PROXY === 'true',
 
   cors: {
-    origin: process.env.CORS_ORIGIN || true,
+    origin: process.env.CORS_ORIGIN
+      ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+      : false,
     credentials: true,
   },
 

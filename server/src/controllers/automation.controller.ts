@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import type { AutomationResult, Ticket } from 'ticketcraft-shared';
+import type { AutomationResult, Ticket, DetailLevel } from 'ticketcraft-shared';
 import { getCredentials } from '../types/index.js';
 import { config } from '../config/index.js';
 import { AutomationStore } from '../services/automation/AutomationStore.js';
@@ -11,18 +11,6 @@ import { McpAgent } from '../services/mcp/McpAgent.js';
 import { AppError } from '../middleware/errorHandler.js';
 
 export class AutomationController {
-  static readonly BASE_JQL_CLAUSES = [
-    'reporter = currentUser()',
-    'labels = "readyForTicketCraftRefinement"',
-  ] as const;
-
-  private static buildJql(extraJql?: string): string {
-    const base: string[] = [...AutomationController.BASE_JQL_CLAUSES];
-    const extra = extraJql?.trim();
-    if (extra) base.push(`(${extra})`);
-    return base.join(' AND ');
-  }
-
   /** Express may type params as string | string[] */
   private static singleRouteParam(raw: string | string[] | undefined): string | undefined {
     const v = Array.isArray(raw) ? raw[0] : raw;
@@ -37,7 +25,6 @@ export class AutomationController {
         data: {
           triggerLabel: config.automation.triggerLabel,
           doneLabel: config.automation.doneLabel,
-          baseClauses: AutomationController.BASE_JQL_CLAUSES,
         },
       });
     } catch (err) {
@@ -45,20 +32,42 @@ export class AutomationController {
     }
   };
 
+  /** Search Jira by JQL and return lightweight ticket metadata (no processing). */
+  search = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { jql, excludeProcessed } = req.body;
+      if (!jql || typeof jql !== 'string' || !jql.trim()) {
+        throw new AppError(400, 'BAD_REQUEST', 'JQL query is required.');
+      }
+      let effectiveJql = jql.trim();
+      if (excludeProcessed) {
+        effectiveJql = `(${effectiveJql}) AND (labels IS EMPTY OR labels NOT IN (${config.automation.doneLabel}))`;
+      }
+      const creds = getCredentials(req);
+      const jira = new JiraClient(creds.jiraBaseUrl, creds.jiraEmail, creds.jiraApiToken);
+      const tickets = await jira.searchByJqlDetailed(effectiveJql);
+      res.json({ success: true, data: { tickets } });
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  /** Process an explicit list of ticket keys (score + improve + annotate). */
   scan = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      const { ticketKeys, detailLevel } = req.body as {
+        ticketKeys?: string[];
+        detailLevel?: DetailLevel;
+      };
+
+      if (!ticketKeys || !Array.isArray(ticketKeys) || ticketKeys.length === 0) {
+        throw new AppError(400, 'BAD_REQUEST', 'ticketKeys array is required.');
+      }
+
       const creds = getCredentials(req);
       const jira = new JiraClient(creds.jiraBaseUrl, creds.jiraEmail, creds.jiraApiToken);
       const ai = new GeminiAdapter(creds.geminiApiKey, creds.geminiModel, creds.geminiTemperature);
-
       const adminCfg = await AdminStore.load();
-      const jql = adminCfg.scanJql || AutomationController.buildJql();
-      const ticketKeys = await jira.searchByJql(jql);
-
-      if (ticketKeys.length === 0) {
-        res.json({ success: true, data: { found: 0, processed: 0, skipped: 0 } });
-        return;
-      }
 
       let repoContextPrompt: string | undefined;
       const profile = await AutomationStore.loadProfile(creds.jiraEmail);
@@ -113,7 +122,10 @@ export class AutomationController {
           }
 
           const score = await ai.scoreTicket(ticket, undefined, enrichedPrompt);
-          const result = await ai.improveTicket(ticket, { repoContextPrompt: enrichedPrompt });
+          const result = await ai.improveTicket(ticket, {
+            repoContextPrompt: enrichedPrompt,
+            detailLevel,
+          });
           const improvements = result.improvedTicket;
 
           let annotations: AutomationResult['annotations'] = [];

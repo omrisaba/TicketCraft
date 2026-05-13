@@ -1,14 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
 import { DraftStore } from '../services/draft/DraftStore.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { getCredentials } from '../types/index.js';
 
 export class DraftController {
   private getEmail(req: Request): string {
-    const email = req.headers['x-jira-email'] as string | undefined;
-    if (!email?.trim()) {
-      throw new AppError(401, 'MISSING_EMAIL', 'X-Jira-Email header is required for draft operations.');
-    }
-    return email.trim();
+    return getCredentials(req).jiraEmail;
   }
 
   save = async (req: Request, res: Response, next: NextFunction): Promise<void> => {

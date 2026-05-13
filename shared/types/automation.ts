@@ -1,6 +1,6 @@
 import type { Ticket, TicketChanges } from './ticket.js';
 import type { TicketScore } from './score.js';
-import type { Annotation } from './api.js';
+import type { Annotation, DetailLevel } from './api.js';
 
 export interface AutomationResult {
   ticketKey: string;
@@ -31,5 +31,21 @@ export interface AutomationScanResult {
 export interface AutomationInfo {
   triggerLabel: string;
   doneLabel: string;
-  baseClauses: readonly string[];
+}
+
+export interface JqlSearchResult {
+  key: string;
+  summary: string;
+  status: string;
+  issueType: string;
+  assignee: string | null;
+}
+
+export interface JqlSearchRequest {
+  jql: string;
+}
+
+export interface AutomationScanRequest {
+  ticketKeys: string[];
+  detailLevel?: DetailLevel;
 }

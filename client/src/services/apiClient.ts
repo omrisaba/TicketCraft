@@ -1,4 +1,19 @@
-import type { ApiResponse, SessionCredentials } from 'ticketcraft-shared';
+import type {
+  ApiResponse,
+  SessionCredentials,
+  ImproveRequest,
+  ImproveResponse,
+  RefineRequest,
+  RefineResponse,
+  ComposeRequest,
+  BreakdownRequest,
+  BreakdownResponse,
+  BatchCreateRequest,
+  BatchCreateResponse,
+  JiraProject,
+  JiraIssueType,
+  JiraUser,
+} from 'ticketcraft-shared';
 
 let currentCredentials: SessionCredentials | null = null;
 
@@ -115,22 +130,39 @@ export const api = {
       parentKey?: string;
       linkToOriginal?: boolean;
       originalKey?: string;
+      assigneeAccountId?: string;
     }) => request<{ key: string; id: string }>('/api/jira/ticket', { method: 'POST', body: JSON.stringify(body) }),
+    getProjects: (query?: string) => {
+      const q = query ? `?query=${encodeURIComponent(query)}` : '';
+      return request<JiraProject[]>(`/api/jira/projects${q}`);
+    },
+    getIssueTypes: (projectKey: string) =>
+      request<JiraIssueType[]>(`/api/jira/projects/${projectKey}/issuetypes`),
+    getAssignableUsers: (projectKey: string, query?: string) => {
+      const q = query ? `?query=${encodeURIComponent(query)}` : '';
+      return request<JiraUser[]>(`/api/jira/projects/${projectKey}/assignable-users${q}`);
+    },
+    batchCreateTickets: (body: BatchCreateRequest) =>
+      request<BatchCreateResponse>('/api/jira/ticket/batch', { method: 'POST', body: JSON.stringify(body) }),
   },
 
   ai: {
     score: (body: unknown) =>
       request('/api/ai/score', { method: 'POST', body: JSON.stringify(body) }),
-    improve: (body: unknown) =>
-      request('/api/ai/improve', { method: 'POST', body: JSON.stringify(body) }),
+    improve: (body: ImproveRequest) =>
+      request<ImproveResponse>('/api/ai/improve', { method: 'POST', body: JSON.stringify(body) }),
     questions: (body: unknown) =>
       request('/api/ai/questions', { method: 'POST', body: JSON.stringify(body) }),
-    enrich: (body: unknown) =>
-      request('/api/ai/enrich', { method: 'POST', body: JSON.stringify(body) }),
+    enrich: (body: ImproveRequest) =>
+      request<ImproveResponse>('/api/ai/enrich', { method: 'POST', body: JSON.stringify(body) }),
+    compose: (body: ComposeRequest) =>
+      request<ImproveResponse>('/api/ai/compose', { method: 'POST', body: JSON.stringify(body) }),
+    breakdown: (body: BreakdownRequest) =>
+      request<BreakdownResponse>('/api/ai/breakdown', { method: 'POST', body: JSON.stringify(body) }),
     annotate: (body: unknown) =>
       request('/api/ai/annotate', { method: 'POST', body: JSON.stringify(body) }),
-    refine: (body: unknown) =>
-      request('/api/ai/refine', { method: 'POST', body: JSON.stringify(body) }),
+    refine: (body: RefineRequest) =>
+      request<RefineResponse>('/api/ai/refine', { method: 'POST', body: JSON.stringify(body) }),
     repoUsage: (body: unknown) =>
       request('/api/ai/repo-usage', { method: 'POST', body: JSON.stringify(body) }),
     document: (body: unknown) =>
@@ -186,10 +218,15 @@ export const api = {
 
   automation: {
     info: () => request('/api/automation/info'),
-    scan: (extraJql?: string) =>
+    search: (jql: string, excludeProcessed?: boolean) =>
+      request('/api/automation/search', {
+        method: 'POST',
+        body: JSON.stringify({ jql, excludeProcessed }),
+      }),
+    scan: (ticketKeys: string[], detailLevel?: string) =>
       request('/api/automation/scan', {
         method: 'POST',
-        body: JSON.stringify({ extraJql }),
+        body: JSON.stringify({ ticketKeys, detailLevel }),
       }),
     pending: () => request('/api/automation/pending'),
     loadResult: (ticketKey: string) => request(`/api/automation/result/${ticketKey}`),
@@ -205,8 +242,8 @@ export const api = {
     save: (snapshot: unknown) =>
       request('/api/history', { method: 'POST', body: JSON.stringify(snapshot) }),
     remove: (id: string) => request(`/api/history/${id}`, { method: 'DELETE' }),
-    markSynced: (id: string) =>
-      request(`/api/history/${id}/synced`, { method: 'PATCH', body: JSON.stringify({}) }),
+    markSynced: (id: string, body?: { syncedAt?: string; finalScore?: { overall: number } }) =>
+      request(`/api/history/${id}/synced`, { method: 'PATCH', body: JSON.stringify(body ?? {}) }),
   },
 
   admin: {

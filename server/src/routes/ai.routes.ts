@@ -11,6 +11,8 @@ router.use(aiRateLimiter);
 
 router.post('/score', controller.score);
 router.post('/improve', controller.improve);
+router.post('/compose', controller.compose);
+router.post('/breakdown', controller.breakdown);
 router.post('/questions', controller.generateQuestions);
 router.post('/enrich', controller.enrich);
 router.post('/annotate', controller.annotate);

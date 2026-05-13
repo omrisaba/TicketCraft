@@ -53,7 +53,7 @@ export class JiraController {
 
   createTicket = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { projectKey, issueType, changes, parentKey, linkToOriginal, originalKey } = req.body;
+      const { projectKey, issueType, changes, parentKey, linkToOriginal, originalKey, assigneeAccountId } = req.body;
 
       if (!projectKey || !changes?.summary) {
         throw new AppError(400, 'INVALID_CREATE', 'projectKey and changes.summary are required.');
@@ -65,6 +65,7 @@ export class JiraController {
         issueType: issueType || 'Task',
         changes,
         parentKey,
+        assigneeAccountId,
       });
 
       if (linkToOriginal && originalKey) {
@@ -81,6 +82,65 @@ export class JiraController {
       }
 
       res.json({ success: true, data: { key: created.key, id: created.id } });
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  getProjects = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const query = (req.query.query as string | undefined)?.trim() || undefined;
+      const client = this.getClient(req);
+      const projects = await client.getProjects(query);
+      res.json({ success: true, data: projects });
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  getIssueTypes = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const projectKey = getParam(req, 'projectKey');
+      if (!projectKey) {
+        throw new AppError(400, 'INVALID_PROJECT', 'projectKey is required.');
+      }
+      const client = this.getClient(req);
+      const types = await client.getIssueTypes(projectKey.toUpperCase());
+      res.json({ success: true, data: types });
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  getAssignableUsers = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const projectKey = getParam(req, 'projectKey');
+      if (!projectKey) {
+        throw new AppError(400, 'INVALID_PROJECT', 'projectKey is required.');
+      }
+      const query = (req.query.query as string | undefined)?.trim() || undefined;
+      const client = this.getClient(req);
+      const users = await client.getAssignableUsers(projectKey.toUpperCase(), query);
+      res.json({ success: true, data: users });
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  batchCreateTickets = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { parentTicket, subtasks } = req.body;
+
+      if (!parentTicket?.projectKey || !parentTicket?.changes?.summary) {
+        throw new AppError(400, 'INVALID_BATCH_CREATE', 'parentTicket with projectKey and changes.summary is required.');
+      }
+      if (!Array.isArray(subtasks) || subtasks.length === 0) {
+        throw new AppError(400, 'INVALID_BATCH_CREATE', 'At least one subtask is required.');
+      }
+
+      const client = this.getClient(req);
+      const result = await client.batchCreateTickets({ parentTicket, subtasks });
+      res.json({ success: true, data: result });
     } catch (err) {
       next(err);
     }

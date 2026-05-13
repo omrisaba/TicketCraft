@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import type { Ticket, McpUsageStats, TicketTemplateType } from 'ticketcraft-shared';
+import type { Ticket, TicketChanges, McpUsageStats, TicketTemplateType, DetailLevel } from 'ticketcraft-shared';
 import { SKILLS_MARKDOWN_MAX_CHARS } from 'ticketcraft-shared';
 import { getCredentials } from '../types/index.js';
 import { GeminiAdapter } from '../services/ai/GeminiAdapter.js';
@@ -17,12 +17,21 @@ interface McpEnrichResult {
 
 let cursorActiveCount = 0;
 
+const SKILLS_RAW_MAX = SKILLS_MARKDOWN_MAX_CHARS * 2;
+
 function parseSkillsMarkdown(body: unknown): string | undefined {
   if (body === null || typeof body !== 'object') return undefined;
   const raw = (body as Record<string, unknown>).skillsMarkdown;
   if (raw === undefined || raw === null) return undefined;
   if (typeof raw !== 'string') {
     throw new AppError(400, 'SKILLS_INVALID', 'skillsMarkdown must be a string.');
+  }
+  if (raw.length > SKILLS_RAW_MAX) {
+    throw new AppError(
+      400,
+      'SKILLS_TOO_LARGE',
+      `skillsMarkdown exceeds maximum allowed size.`,
+    );
   }
   const trimmed = raw.trim();
   if (trimmed === '') return undefined;
@@ -107,7 +116,7 @@ export class AIController {
 
   improve = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { ticket, templateType, userAnswers, linkedTickets, repoContextPrompt, referenceContent, repoUrl, useCursor } = req.body;
+      const { ticket, templateType, userAnswers, linkedTickets, repoContextPrompt, referenceContent, repoUrl, useCursor, detailLevel } = req.body;
       const skillsMarkdown = parseSkillsMarkdown(req.body);
 
       const improveBase = {
@@ -116,6 +125,7 @@ export class AIController {
         linkedTickets,
         referenceContent,
         skillsMarkdown,
+        detailLevel,
       };
 
       if (useCursor) {
@@ -182,6 +192,171 @@ export class AIController {
     }
   }
 
+  compose = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { freeText, projectKey, issueType, templateType, repoContextPrompt, referenceContent, repoUrl, useCursor, detailLevel } = req.body;
+      const skillsMarkdown = parseSkillsMarkdown(req.body);
+
+      if (!freeText?.trim()) {
+        throw new AppError(400, 'INVALID_COMPOSE', 'freeText is required.');
+      }
+
+      const composeOpts = {
+        issueType,
+        templateType,
+        referenceContent,
+        skillsMarkdown,
+        detailLevel,
+      };
+
+      if (useCursor) {
+        const result = await this.composeWithCursor(req, freeText, repoUrl, composeOpts);
+        res.json({ success: true, data: result });
+        return;
+      }
+
+      const syntheticTicket: Ticket = {
+        id: '', key: '', summary: freeText.slice(0, 200), description: freeText,
+        status: 'New', priority: null, assignee: null, reporter: null, reporterEmail: null,
+        labels: [], storyPoints: null, issueType: issueType || 'Story',
+        acceptanceCriteria: null, parent: null, subtasks: [], linkedTickets: [],
+        attachments: [], comments: [], created: '', updated: '', rawAdf: null,
+      };
+      const { prompt: enrichedPrompt, mcpStats } = await this.enrichWithMcpFromReq(req, syntheticTicket, repoUrl, repoContextPrompt);
+      const ai = this.getAI(req);
+      const result = await ai.composeTicket(freeText, {
+        ...composeOpts,
+        repoContextPrompt: enrichedPrompt,
+      });
+
+      res.json({ success: true, data: { ...result, mcpStats } });
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  private async composeWithCursor(
+    req: Request,
+    freeText: string,
+    repoUrl: string | undefined,
+    options: {
+      issueType?: string;
+      templateType?: TicketTemplateType;
+      referenceContent?: string;
+      skillsMarkdown?: string;
+      detailLevel?: DetailLevel;
+    },
+  ) {
+    const admin = await AdminStore.load();
+    if (!admin.cursorEnabled || !admin.cursorApiKey) {
+      throw new AppError(400, 'CURSOR_DISABLED', 'Cursor integration is not enabled.');
+    }
+    if (!repoUrl) {
+      throw new AppError(400, 'CURSOR_NO_REPO', 'Cursor requires a connected repository.');
+    }
+    if (cursorActiveCount >= admin.cursorMaxConcurrent) {
+      const ai = this.getAI(req);
+      const result = await ai.composeTicket(freeText, options);
+      return { ...result, cursorFallback: true, codeInsights: null };
+    }
+    const creds = getCredentials(req);
+    const parsed = RepoService.parseRepoUrl(repoUrl);
+    const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
+    const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
+    const cursor = new CursorAdapter(admin.cursorApiKey, admin.cursorModel, repoDir);
+
+    cursorActiveCount++;
+    try {
+      const result = await cursor.composeTicket(freeText, options);
+      return { ...result, cursorFallback: false };
+    } finally {
+      cursorActiveCount--;
+    }
+  }
+
+  breakdown = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { ticket, projectKey, issueType, subtaskType, maxTasks, repoContextPrompt, referenceContent, repoUrl, useCursor, detailLevel } = req.body;
+      const skillsMarkdown = parseSkillsMarkdown(req.body);
+
+      if (!ticket?.summary) {
+        throw new AppError(400, 'INVALID_BREAKDOWN', 'ticket with a summary is required.');
+      }
+
+      const breakdownOpts = {
+        issueType,
+        subtaskType,
+        maxTasks,
+        referenceContent,
+        skillsMarkdown,
+        detailLevel,
+      };
+
+      if (useCursor) {
+        const result = await this.breakdownWithCursor(req, ticket, repoUrl, breakdownOpts);
+        res.json({ success: true, data: result });
+        return;
+      }
+
+      const syntheticTicket: Ticket = {
+        id: '', key: '', summary: ticket.summary || '', description: ticket.description || '',
+        status: 'New', priority: null, assignee: null, reporter: null, reporterEmail: null,
+        labels: ticket.labels || [], storyPoints: ticket.storyPoints ?? null,
+        issueType: issueType || 'Story', acceptanceCriteria: ticket.acceptanceCriteria || null,
+        parent: null, subtasks: [], linkedTickets: [], attachments: [], comments: [],
+        created: '', updated: '', rawAdf: null,
+      };
+      const { prompt: enrichedPrompt, mcpStats } = await this.enrichWithMcpFromReq(req, syntheticTicket, repoUrl, repoContextPrompt);
+      const ai = this.getAI(req);
+      const result = await ai.breakdownTicket(ticket as TicketChanges, {
+        ...breakdownOpts,
+        repoContextPrompt: enrichedPrompt,
+      });
+
+      res.json({ success: true, data: { ...result, mcpStats } });
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  private async breakdownWithCursor(
+    req: Request,
+    ticket: TicketChanges,
+    repoUrl: string | undefined,
+    options: {
+      issueType?: string;
+      subtaskType?: string;
+      maxTasks?: number;
+      referenceContent?: string;
+      skillsMarkdown?: string;
+      detailLevel?: DetailLevel;
+    },
+  ) {
+    const admin = await AdminStore.load();
+    if (!admin.cursorEnabled || !admin.cursorApiKey) {
+      throw new AppError(400, 'CURSOR_DISABLED', 'Cursor integration is not enabled.');
+    }
+    if (!repoUrl) {
+      throw new AppError(400, 'CURSOR_NO_REPO', 'Cursor requires a connected repository.');
+    }
+    if (cursorActiveCount >= admin.cursorMaxConcurrent) {
+      const ai = this.getAI(req);
+      return ai.breakdownTicket(ticket, options);
+    }
+    const creds = getCredentials(req);
+    const parsed = RepoService.parseRepoUrl(repoUrl);
+    const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
+    const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
+    const cursor = new CursorAdapter(admin.cursorApiKey, admin.cursorModel, repoDir);
+
+    cursorActiveCount++;
+    try {
+      return await cursor.breakdownTicket(ticket, options);
+    } finally {
+      cursorActiveCount--;
+    }
+  }
+
   generateQuestions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { ticket, weakDimensions, repoContextPrompt, referenceContent, repoUrl } = req.body;
@@ -197,7 +372,7 @@ export class AIController {
 
   enrich = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { ticket, userAnswers, templateType, linkedTickets, repoContextPrompt, referenceContent, repoUrl } = req.body;
+      const { ticket, userAnswers, templateType, linkedTickets, repoContextPrompt, referenceContent, repoUrl, detailLevel } = req.body;
       const skillsMarkdown = parseSkillsMarkdown(req.body);
       const { prompt: enrichedPrompt, mcpStats } = await this.enrichWithMcpFromReq(req, ticket, repoUrl, repoContextPrompt);
       const ai = this.getAI(req);
@@ -208,6 +383,7 @@ export class AIController {
         repoContextPrompt: enrichedPrompt,
         referenceContent,
         skillsMarkdown,
+        detailLevel,
       });
 
       res.json({ success: true, data: { ...result, mcpStats } });
@@ -230,9 +406,11 @@ export class AIController {
 
   refine = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { ticket, currentImprovements, instruction, conversationHistory, repoContextPrompt, referenceContent } = req.body;
+      const { ticket, currentImprovements, instruction, conversationHistory, repoContextPrompt, referenceContent, repoUrl } = req.body;
+      const skillsMarkdown = parseSkillsMarkdown(req.body);
+      const { prompt: enrichedPrompt } = await this.enrichWithMcpFromReq(req, ticket, repoUrl, repoContextPrompt);
       const ai = this.getAI(req);
-      const result = await ai.refineTicket(ticket, currentImprovements, instruction, conversationHistory || [], repoContextPrompt, referenceContent);
+      const result = await ai.refineTicket(ticket, currentImprovements, instruction, conversationHistory || [], enrichedPrompt, referenceContent, skillsMarkdown);
 
       res.json({ success: true, data: result });
     } catch (err) {

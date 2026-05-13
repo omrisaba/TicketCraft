@@ -17,6 +17,7 @@ import { draftRouter } from './routes/draft.routes.js';
 import { automationRouter } from './routes/automation.routes.js';
 import { adminRouter } from './routes/admin.routes.js';
 import { historyRouter } from './routes/history.routes.js';
+import { setupSwagger } from './openapi/swagger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -25,7 +26,12 @@ if (config.trustProxy) {
   app.set('trust proxy', 1);
 }
 
-app.use(securityHeaders);
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/docs') || req.path.startsWith('/api/openapi.json')) {
+    return next();
+  }
+  securityHeaders(req, res, next);
+});
 app.use(cors(config.cors));
 app.use(rateLimiter);
 app.use(requestLogger);
@@ -45,6 +51,8 @@ app.use('/api/drafts', draftRouter);
 app.use('/api/automation', automationRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/history', historyRouter);
+
+setupSwagger(app);
 
 const clientDist = path.resolve(__dirname, '../../client/dist');
 app.use(express.static(clientDist));

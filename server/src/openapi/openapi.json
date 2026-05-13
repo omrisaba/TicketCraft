@@ -1,0 +1,2455 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "TicketCraft API",
+    "version": "1.0.0",
+    "description": "HTTP JSON API used by the TicketCraft UI and integrators. Most write routes require `X-Jira-Email` and `X-Jira-Token`. Optional `X-Gemini-Model`, `X-Gemini-Temperature`, `X-Github-Token`, `X-Gitlab-Token` mirror the SPA. Admin routes still require the same headers (no separate admin token). Draft/history routes only require `X-Jira-Email`."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "TicketCraft server (same origin as deployment)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Liveness"
+    },
+    {
+      "name": "Session",
+      "description": "Config + credential validation"
+    },
+    {
+      "name": "Jira",
+      "description": "Issue tracker proxy"
+    },
+    {
+      "name": "AI",
+      "description": "Gemini / Cursor flows"
+    },
+    {
+      "name": "Export",
+      "description": "Markdown exports"
+    },
+    {
+      "name": "Templates",
+      "description": "Ticket templates"
+    },
+    {
+      "name": "Repository",
+      "description": "Repo + reference helpers"
+    },
+    {
+      "name": "Drafts",
+      "description": "Per-email autosave"
+    },
+    {
+      "name": "Automation",
+      "description": "Jira automation hooks"
+    },
+    {
+      "name": "Admin",
+      "description": "Admin JSON + logs"
+    },
+    {
+      "name": "History",
+      "description": "Saved improvement snapshots"
+    },
+    {
+      "name": "Documentation",
+      "description": "OpenAPI delivery"
+    }
+  ],
+  "components": {
+    "parameters": {
+      "XJiraEmail": {
+        "name": "X-Jira-Email",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Jira user email used for upstream Jira REST calls."
+      },
+      "XJiraToken": {
+        "name": "X-Jira-Token",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Jira REST API token (id.atlassian.com)."
+      },
+      "XGeminiModel": {
+        "name": "X-Gemini-Model",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Supported Gemini model id (see `/api/session/config`)."
+      },
+      "XGeminiTemperature": {
+        "name": "X-Gemini-Temperature",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "pattern": "^0(\\.\\d+)?|1(\\.0+)?$",
+          "example": "0.3"
+        },
+        "description": "Sampling temperature between 0 and 1."
+      },
+      "XGithubToken": {
+        "name": "X-Github-Token",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Personal access token for private GitHub repo context / MCP."
+      },
+      "XGitlabToken": {
+        "name": "X-Gitlab-Token",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Access token for private GitLab repos / MCP."
+      },
+      "TicketKeyPath": {
+        "name": "ticketKey",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "example": "PROJ-123"
+      },
+      "SnapshotIdPath": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Snapshot id returned when saving `/api/history`."
+      },
+      "TemplateTypePath": {
+        "name": "type",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "bug",
+            "feature",
+            "spike",
+            "tech-debt"
+          ]
+        }
+      }
+    },
+    "schemas": {
+      "ApiSuccessGeneric": {
+        "type": "object",
+        "description": "Responses use `{ success, data?, error? }`; types vary per route.",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "Ticket": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Serialized Jira ticket. See ticketcraft-shared `Ticket` for full shapes.",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "summary",
+          "status"
+        ]
+      },
+      "TicketChanges": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Field updates (summary/description/labels/…) — ticketcraft-shared `TicketChanges`."
+      },
+      "DraftData": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "`DraftData` from ticketcraft-shared (autosave envelope). Minimum: `ticketKey`."
+      },
+      "HistorySnapshot": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "`HistorySnapshot` from ticketcraft-shared; must include `id` and `ticketKey` on save."
+      },
+      "RefineResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "updatedTicket": {
+                "$ref": "#/components/schemas/TicketChanges"
+              },
+              "explanation": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "RepoUsageResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              },
+              "connections": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "type": "string"
+                    },
+                    "repoEvidence": {
+                      "type": "string"
+                    },
+                    "explanation": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "GeneratedDocumentResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "markdown",
+                  "mermaid"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/openapi.json": {
+      "get": {
+        "tags": [
+          "Documentation"
+        ],
+        "summary": "OpenAPI document (this file)",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3 JSON"
+          }
+        }
+      }
+    },
+    "/api/session/config": {
+      "get": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "Public server config for the browser client",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/session/validate": {
+      "post": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "Validate Jira credentials (JSON body; not header auth)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jiraEmail",
+                  "jiraApiToken"
+                ],
+                "properties": {
+                  "jiraEmail": {
+                    "type": "string"
+                  },
+                  "jiraApiToken": {
+                    "type": "string"
+                  },
+                  "geminiModel": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jira/ticket/{ticketKey}/linked": {
+      "get": {
+        "tags": [
+          "Jira"
+        ],
+        "summary": "Fetch linked tickets",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          },
+          {
+            "$ref": "#/components/parameters/TicketKeyPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing credentials"
+          }
+        }
+      }
+    },
+    "/api/jira/ticket/{ticketKey}": {
+      "put": {
+        "tags": [
+          "Jira"
+        ],
+        "summary": "Update ticket",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          },
+          {
+            "$ref": "#/components/parameters/TicketKeyPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TicketChanges"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing credentials"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Jira"
+        ],
+        "summary": "Fetch ticket by key",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          },
+          {
+            "$ref": "#/components/parameters/TicketKeyPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing credentials"
+          }
+        }
+      }
+    },
+    "/api/jira/ticket/{ticketKey}/attach": {
+      "post": {
+        "tags": [
+          "Jira"
+        ],
+        "summary": "Upload attachment (base64-encoded body)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          },
+          {
+            "$ref": "#/components/parameters/TicketKeyPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "filename",
+                  "content"
+                ],
+                "properties": {
+                  "filename": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "base64-encoded file bytes"
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing credentials"
+          }
+        }
+      }
+    },
+    "/api/jira/ticket": {
+      "post": {
+        "tags": [
+          "Jira"
+        ],
+        "summary": "Create ticket",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "projectKey",
+                  "changes"
+                ],
+                "properties": {
+                  "projectKey": {
+                    "type": "string",
+                    "example": "PROJ"
+                  },
+                  "issueType": {
+                    "type": "string",
+                    "example": "Task"
+                  },
+                  "changes": {
+                    "$ref": "#/components/schemas/TicketChanges"
+                  },
+                  "parentKey": {
+                    "type": "string"
+                  },
+                  "linkToOriginal": {
+                    "type": "boolean"
+                  },
+                  "originalKey": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing credentials"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/ai/score": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Score ticket quality",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ticket"
+                ],
+                "properties": {
+                  "ticket": {
+                    "$ref": "#/components/schemas/Ticket"
+                  },
+                  "linkedTickets": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  },
+                  "repoContextPrompt": {
+                    "type": "string"
+                  },
+                  "referenceContent": {
+                    "type": "string"
+                  },
+                  "repoUrl": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/ai/improve": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Generate improved ticket (Gemini / optional Cursor + MCP enrichment)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ticket"
+                ],
+                "properties": {
+                  "ticket": {
+                    "$ref": "#/components/schemas/Ticket"
+                  },
+                  "templateType": {
+                    "type": "string",
+                    "enum": [
+                      "bug",
+                      "feature",
+                      "spike",
+                      "tech-debt"
+                    ]
+                  },
+                  "userAnswers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "linkedTickets": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  },
+                  "skillsMarkdown": {
+                    "type": "string",
+                    "description": "Optional session Markdown rules"
+                  },
+                  "repoContextPrompt": {
+                    "type": "string"
+                  },
+                  "referenceContent": {
+                    "type": "string"
+                  },
+                  "repoUrl": {
+                    "type": "string"
+                  },
+                  "useCursor": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/ai/questions": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Guide questions for weak score dimensions",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ticket",
+                  "weakDimensions"
+                ],
+                "properties": {
+                  "ticket": {
+                    "$ref": "#/components/schemas/Ticket"
+                  },
+                  "weakDimensions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "repoContextPrompt": {
+                    "type": "string"
+                  },
+                  "referenceContent": {
+                    "type": "string"
+                  },
+                  "repoUrl": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/ai/enrich": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Improve with MCP/repo enrichment (skillsMarkdown supported)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ticket"
+                ],
+                "properties": {
+                  "ticket": {
+                    "$ref": "#/components/schemas/Ticket"
+                  },
+                  "userAnswers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "templateType": {
+                    "type": "string"
+                  },
+                  "linkedTickets": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Ticket"
+                    }
+                  },
+                  "skillsMarkdown": {
+                    "type": "string"
+                  },
+                  "repoContextPrompt": {
+                    "type": "string"
+                  },
+                  "referenceContent": {
+                    "type": "string"
+                  },
+                  "repoUrl": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/ai/annotate": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Explain why fields changed",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "original",
+                  "improved"
+                ],
+                "properties": {
+                  "original": {
+                    "$ref": "#/components/schemas/Ticket"
+                  },
+                  "improved": {
+                    "$ref": "#/components/schemas/TicketChanges"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/ai/refine": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Iterative refinement chat (skillsMarkdown + MCP supported)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ticket",
+                  "currentImprovements",
+                  "instruction",
+                  "conversationHistory"
+                ],
+                "properties": {
+                  "ticket": {
+                    "$ref": "#/components/schemas/Ticket"
+                  },
+                  "currentImprovements": {
+                    "$ref": "#/components/schemas/TicketChanges"
+                  },
+                  "instruction": {
+                    "type": "string"
+                  },
+                  "conversationHistory": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "repoContextPrompt": {
+                    "type": "string"
+                  },
+                  "referenceContent": {
+                    "type": "string"
+                  },
+                  "skillsMarkdown": {
+                    "type": "string",
+                    "description": "Optional session Markdown rules"
+                  },
+                  "repoUrl": {
+                    "type": "string",
+                    "description": "Repo URL for MCP enrichment"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Refined ticket with explanation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefineResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/ai/repo-usage": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Summarize repo alignment for an improved ticket",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "improvedTicket",
+                  "repoContextPrompt"
+                ],
+                "properties": {
+                  "improvedTicket": {
+                    "$ref": "#/components/schemas/TicketChanges"
+                  },
+                  "repoContextPrompt": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Repo usage summary with field-level connections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepoUsageResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/ai/document": {
+      "post": {
+        "tags": [
+          "AI"
+        ],
+        "summary": "Generate supporting document (TRD, runbook, etc.)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ticket",
+                  "docType"
+                ],
+                "properties": {
+                  "ticket": {
+                    "$ref": "#/components/schemas/Ticket"
+                  },
+                  "docType": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratedDocumentResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/export/markdown": {
+      "post": {
+        "tags": [
+          "Export"
+        ],
+        "summary": "Download improved ticket as Markdown",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ticket",
+                  "format"
+                ],
+                "properties": {
+                  "ticket": {
+                    "$ref": "#/components/schemas/Ticket"
+                  },
+                  "improvements": {
+                    "$ref": "#/components/schemas/TicketChanges"
+                  },
+                  "score": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "markdown",
+                      "pdf"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Markdown bytes",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/export/pdf": {
+      "post": {
+        "tags": [
+          "Export"
+        ],
+        "summary": "Legacy route name (returns Markdown like `/api/export/markdown`)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ticket",
+                  "format"
+                ],
+                "properties": {
+                  "ticket": {
+                    "$ref": "#/components/schemas/Ticket"
+                  },
+                  "improvements": {
+                    "$ref": "#/components/schemas/TicketChanges"
+                  },
+                  "score": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "markdown",
+                      "pdf"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Markdown bytes",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/templates": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "List template metadata",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/templates/{type}": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "Fetch template content",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TemplateTypePath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/repo/context": {
+      "post": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Fetch lightweight repo metadata for prompts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "repoUrl"
+                ],
+                "properties": {
+                  "repoUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/repo/fetch-urls": {
+      "post": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Fetch reference URLs (markdown/html text)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "urls"
+                ],
+                "properties": {
+                  "urls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "maxItems": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/repo/upload-files": {
+      "post": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Upload text files (multipart form field `files`, up to 10)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "files"
+                ],
+                "properties": {
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/drafts/check": {
+      "get": {
+        "tags": [
+          "Drafts"
+        ],
+        "summary": "Check for saved draft metadata",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          }
+        ]
+      }
+    },
+    "/api/drafts/load": {
+      "get": {
+        "tags": [
+          "Drafts"
+        ],
+        "summary": "Load latest draft for this X-Jira-Email",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          }
+        ]
+      }
+    },
+    "/api/drafts/save": {
+      "post": {
+        "tags": [
+          "Drafts"
+        ],
+        "summary": "Persist draft payload",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftData"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          }
+        ]
+      }
+    },
+    "/api/drafts": {
+      "delete": {
+        "tags": [
+          "Drafts"
+        ],
+        "summary": "Delete saved draft",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          }
+        ]
+      }
+    },
+    "/api/automation/info": {
+      "get": {
+        "tags": [
+          "Automation"
+        ],
+        "summary": "Automation labels + base JQL fragments",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/automation/scan": {
+      "post": {
+        "tags": [
+          "Automation"
+        ],
+        "summary": "Scan Jira + process eligible tickets (server-side job)",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/automation/pending": {
+      "get": {
+        "tags": [
+          "Automation"
+        ],
+        "summary": "List pending automation results for user",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/automation/profile": {
+      "get": {
+        "tags": [
+          "Automation"
+        ],
+        "summary": "Load automation profile (repo URL)",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Automation"
+        ],
+        "summary": "Save automation profile",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repoUrl": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/admin/settings": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Load admin settings JSON (admin UI)",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Save admin settings JSON",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/admin/cursor-models": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List Cursor models for admin dropdown",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/admin/logs": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Read rotating LLM/MCP logs",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Clear log buffer",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          }
+        ]
+      }
+    },
+    "/api/history": {
+      "post": {
+        "tags": [
+          "History"
+        ],
+        "summary": "Save history snapshot",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HistorySnapshot"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "History"
+        ],
+        "summary": "List snapshots",
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          }
+        ]
+      }
+    },
+    "/api/history/{id}": {
+      "get": {
+        "tags": [
+          "History"
+        ],
+        "summary": "Load snapshot",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/SnapshotIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "History"
+        ],
+        "summary": "Delete snapshot",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/SnapshotIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/history/{id}/synced": {
+      "patch": {
+        "tags": [
+          "History"
+        ],
+        "summary": "Mark snapshot synced to Jira",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/SnapshotIdPath"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "syncedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/automation/result/{ticketKey}": {
+      "get": {
+        "tags": [
+          "Automation"
+        ],
+        "summary": "Load automation result",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          },
+          {
+            "$ref": "#/components/parameters/TicketKeyPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Automation"
+        ],
+        "summary": "Dismiss automation result",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XJiraEmail"
+          },
+          {
+            "$ref": "#/components/parameters/XJiraToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiModel"
+          },
+          {
+            "$ref": "#/components/parameters/XGeminiTemperature"
+          },
+          {
+            "$ref": "#/components/parameters/XGithubToken"
+          },
+          {
+            "$ref": "#/components/parameters/XGitlabToken"
+          },
+          {
+            "$ref": "#/components/parameters/TicketKeyPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiSuccessGeneric"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

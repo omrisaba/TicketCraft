@@ -1,14 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
 import { HistoryStore } from '../services/history/HistoryStore.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { getCredentials } from '../types/index.js';
 
 export class HistoryController {
   private getEmail(req: Request): string {
-    const email = req.headers['x-jira-email'] as string | undefined;
-    if (!email?.trim()) {
-      throw new AppError(401, 'MISSING_EMAIL', 'X-Jira-Email header is required for history operations.');
-    }
-    return email.trim();
+    return getCredentials(req).jiraEmail;
   }
 
   save = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -74,11 +71,16 @@ export class HistoryController {
     try {
       const email = this.getEmail(req);
       const id = req.params.id as string;
-      const { syncedAt } = req.body;
+      const { syncedAt, finalScore } = req.body;
 
       if (!id) throw new AppError(400, 'MISSING_ID', 'Snapshot id is required.');
 
-      await HistoryStore.updateSynced(email, id, syncedAt || new Date().toISOString());
+      await HistoryStore.updateSynced(
+        email,
+        id,
+        syncedAt || new Date().toISOString(),
+        finalScore,
+      );
       res.json({ success: true, data: { message: 'Snapshot updated.' } });
     } catch (err) {
       next(err);

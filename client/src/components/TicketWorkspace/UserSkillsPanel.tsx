@@ -2,6 +2,10 @@ import { Card } from '../ui/Card';
 import { ChevronDown, ChevronUp, ScrollText } from 'lucide-react';
 import { SKILLS_MARKDOWN_MAX_CHARS } from 'ticketcraft-shared';
 
+export function isSkillsOverLimit(raw: string): boolean {
+  return raw.trim().length > SKILLS_MARKDOWN_MAX_CHARS;
+}
+
 export interface UserSkillsPanelProps {
   value: string;
   onChange: (value: string) => void;

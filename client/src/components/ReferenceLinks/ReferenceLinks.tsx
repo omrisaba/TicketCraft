@@ -124,7 +124,7 @@ export function ReferenceLinks({ links, onChange, disabled }: ReferenceLinksProp
                 onChange={(e) => setInputUrl(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Paste public URL..."
-                className="flex-1 text-xs border border-gray-300 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="flex-1 min-w-0 text-xs border border-gray-300 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 disabled={busy}
               />
               <button

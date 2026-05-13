@@ -5,8 +5,8 @@ import { Card } from '../ui/Card';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
-import type { GeminiModel, RepoContext } from 'ticketcraft-shared';
-import { SKILLS_MARKDOWN_MAX_CHARS } from 'ticketcraft-shared';
+import type { GeminiModel, RepoContext, DetailLevel } from 'ticketcraft-shared';
+import { SKILLS_MARKDOWN_MAX_CHARS, DETAIL_LEVEL_META, suggestedDetailLevel } from 'ticketcraft-shared';
 import { ScoreCard } from '../ScoreCard/ScoreCard';
 import { GuidingQuestions } from '../GuidingQuestions/GuidingQuestions';
 import { DiffView } from '../DiffView/DiffView';
@@ -23,7 +23,8 @@ import { PendingReviews } from '../PendingReviews/PendingReviews';
 import { AdminSettings } from '../AdminSettings/AdminSettings';
 import { LogsPanel } from '../LogsPanel/LogsPanel';
 import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
-import { UserSkillsPanel } from './UserSkillsPanel';
+import { TicketGraph } from '../TicketGraph/TicketGraph';
+import { UserSkillsPanel, isSkillsOverLimit } from './UserSkillsPanel';
 import type {
   Ticket,
   TicketScore,
@@ -38,6 +39,7 @@ import type {
   AutomationResult,
   McpUsageStats,
   HistorySnapshot,
+  ImproveResponse,
 } from 'ticketcraft-shared';
 import {
   Search,
@@ -61,6 +63,12 @@ import {
   History,
   ScrollText,
   FilePlus2,
+  MessageCircleQuestion,
+  Home,
+  Network,
+  Layers,
+  Info,
+  BookOpen,
 } from 'lucide-react';
 
 type WorkspaceStep = 'fetch' | 'scored' | 'improving' | 'review';
@@ -92,6 +100,7 @@ export function TicketWorkspace() {
   const [linkedTickets, setLinkedTickets] = useState<Ticket[]>([]);
   const [score, setScore] = useState<TicketScore | null>(null);
   const [previousScore, setPreviousScore] = useState<TicketScore | null>(null);
+  const [originalScore, setOriginalScore] = useState<number | null>(null);
   const [improvements, setImprovements] = useState<TicketChanges | null>(null);
   const [questions, setQuestions] = useState<GuidingQuestion[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -99,11 +108,14 @@ export function TicketWorkspace() {
   const [repoUsageLoading, setRepoUsageLoading] = useState(false);
   const [mcpStats, setMcpStats] = useState<McpUsageStats | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<TicketTemplateType | null>(null);
+  const [detailLevel, setDetailLevel] = useState<DetailLevel>('medium');
+  const [aiNudge, setAiNudge] = useState<'cursor' | 'gemini' | null>(null);
   const [step, setStep] = useState<WorkspaceStep>('fetch');
   const [showHistory, setShowHistory] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showTicketMap, setShowTicketMap] = useState(false);
   const [useCursor, setUseCursor] = useState(false);
   const [codeInsights, setCodeInsights] = useState<string | null>(null);
   const [cursorFallback, setCursorFallback] = useState(false);
@@ -128,8 +140,7 @@ export function TicketWorkspace() {
   /** For expanding custom skills once when entering Review with content */
   const priorStepRef = useRef<WorkspaceStep>('fetch');
 
-  const skillsEffectiveLen = userSkillsMarkdown.trim().length;
-  const skillsOverLimit = skillsEffectiveLen > SKILLS_MARKDOWN_MAX_CHARS;
+  const skillsOverLimit = isSkillsOverLimit(userSkillsMarkdown);
 
   useEffect(() => {
     const was = priorStepRef.current;
@@ -188,6 +199,10 @@ export function TicketWorkspace() {
       setTicket(draft.ticket);
       setScore(draft.score);
       setPreviousScore(draft.previousScore);
+      setOriginalScore(
+        draft.previousScore?.overall ?? draft.score?.overall ?? null,
+      );
+      setDetailLevel(suggestedDetailLevel(draft.ticket.issueType));
       setImprovements(draft.improvements);
       setQuestions(draft.questions || []);
       setAnnotations(draft.annotations || []);
@@ -236,6 +251,8 @@ export function TicketWorkspace() {
       setTicketKey(result.ticketKey);
       setTicket(result.ticket);
       setScore(result.score);
+      setOriginalScore(result.score.overall);
+      setDetailLevel(suggestedDetailLevel(result.ticket.issueType));
       setImprovements(result.improvements);
       setAnnotations(result.annotations || []);
       setStep('review');
@@ -263,6 +280,7 @@ export function TicketWorkspace() {
     setLinkedTickets([]);
     setScore(null);
     setPreviousScore(null);
+    setOriginalScore(null);
     setImprovements(null);
     setQuestions([]);
     setAnnotations([]);
@@ -272,8 +290,11 @@ export function TicketWorkspace() {
     setCursorFallback(false);
     setReferenceLinks([]);
     setSelectedTemplate(null);
+    setDetailLevel('medium');
+    setAiNudge(null);
     setUserSkillsMarkdown('');
     setShowUserSkills(false);
+    setShowTicketMap(false);
     setViewingHistoryId(null);
     setAutomationTicketKey(null);
     setStep('fetch');
@@ -295,6 +316,7 @@ export function TicketWorkspace() {
       const ticketData = await api.jira.getTicket(ticketKey.trim().toUpperCase()) as Ticket;
       setTicket(ticketData);
       setTicketKey(ticketData.key);
+      setDetailLevel(suggestedDetailLevel(ticketData.issueType));
 
       try {
         setStatusMessage('Loading linked tickets...');
@@ -316,6 +338,7 @@ export function TicketWorkspace() {
       const referenceContent = formatReferenceContent(savedLinks);
       const scoreResult = await api.ai.score({ ticket: ticketData, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl }) as TicketScore;
       setScore(scoreResult);
+      setOriginalScore(scoreResult.overall);
       setStep('scored');
 
       addHistoryEntry({
@@ -327,25 +350,36 @@ export function TicketWorkspace() {
         timestamp: new Date().toISOString(),
       });
 
-      const weakDims = scoreResult.dimensions
-        .filter((d) => d.score < 7)
-        .map((d) => d.id);
-
-      if (weakDims.length > 0) {
-        setQuestionsLoading(true);
-        setStatusMessage('Generating guiding questions...');
-        try {
-          const qRefContent = formatReferenceContent(savedLinks);
-          const qResult = await api.ai.questions({ ticket: ticketData, weakDimensions: weakDims, repoContextPrompt, referenceContent: qRefContent, repoUrl: connectedRepoUrl }) as { questions: GuidingQuestion[] };
-          setQuestions(qResult.questions || []);
-        } catch { /* questions are best-effort */ }
-        setQuestionsLoading(false);
-      }
     } catch (err: any) {
       setError(err.message || 'Failed to fetch ticket.');
     } finally {
       setFetchLoading(false);
       setScoreLoading(false);
+      setStatusMessage(null);
+    }
+  };
+
+  const handleGenerateQuestions = async () => {
+    if (!ticket || !score) return;
+    const weakDims = score.dimensions.filter((d) => d.score < 7).map((d) => d.id);
+    if (weakDims.length === 0) return;
+
+    setQuestionsLoading(true);
+    setStatusMessage('Generating guiding questions...');
+    try {
+      const referenceContent = formatReferenceContent();
+      const qResult = await api.ai.questions({
+        ticket,
+        weakDimensions: weakDims,
+        repoContextPrompt,
+        referenceContent,
+        repoUrl: connectedRepoUrl,
+      }) as { questions: GuidingQuestion[] };
+      setQuestions(qResult.questions || []);
+    } catch {
+      setError('Failed to generate guiding questions.');
+    } finally {
+      setQuestionsLoading(false);
       setStatusMessage(null);
     }
   };
@@ -369,20 +403,26 @@ export function TicketWorkspace() {
       const trimmedSkills = userSkillsMarkdown.trim();
       const result = await api.ai.improve({
         ticket,
-        templateType: selectedTemplate,
+        templateType: selectedTemplate ?? undefined,
         userAnswers: answersInput,
         linkedTickets: linkedTickets.length > 0 ? linkedTickets : undefined,
+        detailLevel,
         repoContextPrompt,
         referenceContent,
         repoUrl: connectedRepoUrl,
         useCursor,
         skillsMarkdown: trimmedSkills === '' ? undefined : trimmedSkills,
-      }) as any;
+      });
+      const data = result as ImproveResponse & {
+        codeInsights?: string | null;
+        cursorFallback?: boolean;
+        mcpStats?: McpUsageStats;
+      };
 
-      setImprovements(result.improvedTicket);
-      setCodeInsights(result.codeInsights || null);
-      setCursorFallback(!!result.cursorFallback);
-      if (result.mcpStats) setMcpStats(result.mcpStats);
+      setImprovements(data.improvedTicket);
+      setCodeInsights(data.codeInsights || null);
+      setCursorFallback(!!data.cursorFallback);
+      if (data.mcpStats) setMcpStats(data.mcpStats);
 
       let resolvedAnnotations: Annotation[] = [];
       try {
@@ -458,12 +498,46 @@ export function TicketWorkspace() {
     setError(null);
 
     try {
+      let finalScore = score;
+
+      if (!previousScore) {
+        setStatusMessage('Scoring improved ticket before sync...');
+        const updatedTicket: Ticket = {
+          ...ticket,
+          summary: improvements.summary || ticket.summary,
+          description: improvements.description || ticket.description,
+          acceptanceCriteria: improvements.acceptanceCriteria || ticket.acceptanceCriteria,
+          labels: improvements.labels || ticket.labels,
+          storyPoints: improvements.storyPoints ?? ticket.storyPoints,
+        };
+        const referenceContent = formatReferenceContent();
+        finalScore = await api.ai.score({
+          ticket: updatedTicket, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl,
+        }) as TicketScore;
+        setPreviousScore(score);
+        setScore(finalScore);
+      }
+
       setStatusMessage('Syncing changes to Jira...');
       await api.jira.updateTicket(ticket.key, improvements);
-      updateHistoryEntry(ticket.key, { syncedAt: new Date().toISOString() });
-      if (viewingHistoryId) {
-        api.history.markSynced(viewingHistoryId).catch(() => {});
+
+      const syncedAt = new Date().toISOString();
+      updateHistoryEntry(ticket.key, { scoreAfter: finalScore?.overall ?? null, syncedAt });
+
+      const snapshotId = await saveSnapshot(ticket, finalScore!, improvements, annotations);
+
+      if (snapshotId) {
+        api.history.markSynced(snapshotId, {
+          syncedAt,
+          finalScore: finalScore ? { overall: finalScore.overall } : undefined,
+        }).catch(() => {});
+      } else if (viewingHistoryId) {
+        api.history.markSynced(viewingHistoryId, {
+          syncedAt,
+          finalScore: finalScore ? { overall: finalScore.overall } : undefined,
+        }).catch(() => {});
       }
+
       if (automationTicketKey) {
         api.automation.dismiss(automationTicketKey).catch(() => {});
       }
@@ -490,6 +564,7 @@ export function TicketWorkspace() {
       ticketSummary: t.summary,
       ticket: t,
       score: s,
+      originalScore: originalScore ?? s.overall,
       improvements: imp,
       annotations: ann,
       repoUsage,
@@ -517,19 +592,36 @@ export function TicketWorkspace() {
       setTicketKey(snap.ticketKey);
       setTicket(snap.ticket);
       setScore(snap.score);
-      setImprovements(snap.improvements);
+      setOriginalScore(snap.originalScore ?? snap.score.overall);
+      setDetailLevel(suggestedDetailLevel(snap.ticket.issueType));
       setAnnotations(snap.annotations || []);
       setRepoUsage(snap.repoUsage || null);
       setMcpStats(snap.mcpStats || null);
       setCodeInsights(snap.codeInsights || null);
       setReferenceLinks(snap.referenceLinks || []);
-      setStep('review');
+
+      const hasImprovements = snap.improvements
+        && (snap.improvements.summary || snap.improvements.description
+          || snap.improvements.acceptanceCriteria);
+      if (hasImprovements) {
+        setImprovements(snap.improvements);
+        setStep('review');
+      } else {
+        setStep('scored');
+      }
       setShowHistory(false);
     } catch (err: any) {
       setError(err.message || 'Failed to load history snapshot.');
     } finally {
       setStatusMessage(null);
     }
+  };
+
+  const handleGoHome = async () => {
+    if (ticket && score && step !== 'fetch') {
+      await saveSnapshot(ticket, score, improvements ?? {}, annotations).catch(() => {});
+    }
+    resetWorkspace();
   };
 
   useEffect(() => {
@@ -539,6 +631,97 @@ export function TicketWorkspace() {
   }, [step, ticket, improvements, score]);
 
   const stepIndex = STEPS.findIndex((s) => s.id === (step === 'improving' ? 'scored' : step));
+
+  const handleDetailLevelChange = (lvl: DetailLevel) => {
+    setDetailLevel(lvl);
+    if (lvl === 'low' && !useCursor && appConfig?.cursorEnabled) {
+      setAiNudge('cursor');
+    } else if (lvl !== 'low' && useCursor) {
+      setAiNudge('gemini');
+    } else {
+      setAiNudge(null);
+    }
+  };
+
+  const detailLevelBar = (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex items-center gap-1.5 text-xs font-medium text-gray-600">
+          <Layers className="w-4 h-4" />
+          Detail:
+        </div>
+        {(['high', 'medium', 'low'] as DetailLevel[]).map((lvl) => {
+          const meta = DETAIL_LEVEL_META[lvl];
+          const active = detailLevel === lvl;
+          return (
+            <button
+              key={lvl}
+              type="button"
+              onClick={() => handleDetailLevelChange(lvl)}
+              className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                active
+                  ? 'bg-blue-50 border-blue-400 text-blue-700 font-semibold'
+                  : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+              }`}
+              title={meta.description}
+            >
+              {meta.label}
+            </button>
+          );
+        })}
+        <span className="text-[11px] text-gray-400 italic hidden sm:inline">
+          {DETAIL_LEVEL_META[detailLevel].description}
+        </span>
+      </div>
+      {aiNudge === 'cursor' && !useCursor && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-800">
+          <Info className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
+          <div>
+            <strong>Implementation-level detail works best with Cursor</strong>, which reads your codebase to reference real files and functions.{' '}
+            <button
+              type="button"
+              onClick={() => { setUseCursor(true); setAiNudge(null); }}
+              className="text-amber-700 underline underline-offset-2 font-semibold hover:text-amber-900"
+            >
+              Switch to Cursor
+            </button>
+            {' · '}
+            <button
+              type="button"
+              onClick={() => setAiNudge(null)}
+              className="text-amber-600 underline underline-offset-2 hover:text-amber-800"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+      {aiNudge === 'gemini' && useCursor && (
+        <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg p-2.5 text-xs text-blue-800">
+          <Info className="w-4 h-4 mt-0.5 shrink-0 text-blue-500" />
+          <div>
+            <strong>Strategic/Balanced detail doesn&apos;t need codebase access.</strong>{' '}
+            Gemini is faster and more cost-effective for high-level improvements.{' '}
+            <button
+              type="button"
+              onClick={() => { setUseCursor(false); setAiNudge(null); }}
+              className="text-blue-700 underline underline-offset-2 font-semibold hover:text-blue-900"
+            >
+              Switch to Gemini
+            </button>
+            {' · '}
+            <button
+              type="button"
+              onClick={() => setAiNudge(null)}
+              className="text-blue-600 underline underline-offset-2 hover:text-blue-800"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -610,6 +793,12 @@ export function TicketWorkspace() {
                 {jiraUser.displayName}
               </span>
             )}
+            {step !== 'fetch' && (
+              <Button variant="ghost" size="sm" onClick={handleGoHome} title="Back to home">
+                <Home className="w-4 h-4" />
+                <span className="hidden sm:inline">Home</span>
+              </Button>
+            )}
             <Button variant="ghost" size="sm" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>
               <Clock className="w-4 h-4" />
               <span className="hidden sm:inline">History</span>
@@ -625,6 +814,16 @@ export function TicketWorkspace() {
                 </Button>
               </>
             )}
+            <a
+              href="/user-guide.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+              title="User Guide"
+            >
+              <BookOpen className="w-4 h-4" />
+              <span className="hidden sm:inline">Guide</span>
+            </a>
             <Button variant="ghost" size="sm" icon={<LogOut className="w-4 h-4" />} onClick={endSession}>
               <span className="hidden sm:inline">End</span>
             </Button>
@@ -724,11 +923,21 @@ export function TicketWorkspace() {
               {ticket.description && (
                 <p className="text-xs text-gray-500 line-clamp-3 leading-relaxed">{ticket.description}</p>
               )}
-              {linkedTickets.length > 0 && (
-                <div className="flex items-center gap-1 text-xs text-gray-400">
-                  <GitBranch className="w-3 h-3" />
-                  {linkedTickets.length} linked ticket{linkedTickets.length > 1 ? 's' : ''}
-                </div>
+              {(ticket.parent || ticket.subtasks.length > 0 || linkedTickets.length > 0) && (
+                <button
+                  onClick={() => setShowTicketMap(true)}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-sm text-blue-700 transition-colors"
+                >
+                  <Network className="w-4 h-4 shrink-0" />
+                  <div className="flex-1 text-left text-xs">
+                    {ticket.parent && <span>Parent: <strong>{ticket.parent.key}</strong></span>}
+                    {ticket.parent && (ticket.subtasks.length > 0 || linkedTickets.length > 0) ? ' · ' : ''}
+                    {ticket.subtasks.length > 0 && <span>{ticket.subtasks.length} subtask{ticket.subtasks.length > 1 ? 's' : ''}</span>}
+                    {ticket.subtasks.length > 0 && linkedTickets.length > 0 ? ' · ' : ''}
+                    {linkedTickets.length > 0 && <span>{linkedTickets.length} linked</span>}
+                  </div>
+                  <span className="text-[10px] font-medium text-blue-500">Map</span>
+                </button>
               )}
             </div>
 
@@ -803,11 +1012,6 @@ export function TicketWorkspace() {
             {/* Fetch step */}
             {(step === 'fetch' || !ticket) && (
               <div className="space-y-6">
-                <PendingReviews onReview={handleReviewAutomation} />
-
-                <RepoConnector />
-                <ReferenceLinks links={referenceLinks} onChange={setReferenceLinks} />
-
                 <Card>
                   <form onSubmit={handleFetch} className="flex items-end gap-3">
                     <div className="flex-1">
@@ -826,38 +1030,55 @@ export function TicketWorkspace() {
                     )}
                   </form>
                 </Card>
+
+                <RepoConnector />
+                <ReferenceLinks links={referenceLinks} onChange={setReferenceLinks} />
+
+                <PendingReviews onReview={handleReviewAutomation} />
               </div>
             )}
 
             {/* Scored step — guiding questions + template + improve */}
             {step === 'scored' && ticket && (
               <div className="space-y-6">
-                {/* Action bar */}
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button
-                    icon={<Sparkles className="w-4 h-4" />}
-                    loading={improveLoading}
-                    disabled={skillsOverLimit}
-                    onClick={() => handleImprove()}
-                  >
-                    Improve with AI
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    icon={<RefreshCw className="w-4 h-4" />}
-                    loading={scoreLoading}
-                    onClick={handleRescore}
-                  >
-                    Re-evaluate
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<Search className="w-3.5 h-3.5" />}
-                    onClick={resetWorkspace}
-                  >
-                    New Ticket
-                  </Button>
+                {/* Action bar + detail level sub-row */}
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      icon={<Sparkles className="w-4 h-4" />}
+                      loading={improveLoading}
+                      disabled={skillsOverLimit}
+                      onClick={() => handleImprove()}
+                    >
+                      Improve with AI
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      icon={<RefreshCw className="w-4 h-4" />}
+                      loading={scoreLoading}
+                      onClick={handleRescore}
+                    >
+                      Re-evaluate
+                    </Button>
+                    {(ticket.parent || ticket.subtasks.length > 0 || ticket.linkedTickets.length > 0) && (
+                      <Button
+                        variant="secondary"
+                        icon={<Network className="w-4 h-4" />}
+                        onClick={() => setShowTicketMap(true)}
+                      >
+                        Ticket Map
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<Search className="w-3.5 h-3.5" />}
+                      onClick={resetWorkspace}
+                    >
+                      New Ticket
+                    </Button>
+                  </div>
+                  {detailLevelBar}
                 </div>
 
                 {/* Full score details */}
@@ -875,13 +1096,17 @@ export function TicketWorkspace() {
                 />
 
                 {/* Guiding questions */}
-                {questionsLoading && (
-                  <Card>
-                    <div className="flex items-center gap-3 text-sm text-gray-500">
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Generating guiding questions based on weak areas...</span>
-                    </div>
-                  </Card>
+                {questions.length === 0 && score && score.dimensions.some((d) => d.score < 7) && (
+                  <Button
+                    variant="secondary"
+                    icon={questionsLoading
+                      ? <RefreshCw className="w-4 h-4 animate-spin" />
+                      : <MessageCircleQuestion className="w-4 h-4" />}
+                    loading={questionsLoading}
+                    onClick={handleGenerateQuestions}
+                  >
+                    Generate Guiding Questions
+                  </Button>
                 )}
                 {questions.length > 0 && (
                   <GuidingQuestions
@@ -917,47 +1142,59 @@ export function TicketWorkspace() {
                   </div>
                 )}
 
-                {/* Action bar */}
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button
-                    icon={<Upload className="w-4 h-4" />}
-                    loading={syncLoading}
-                    onClick={handleSync}
-                  >
-                    Sync to Jira
-                  </Button>
-                  <Button
-                    icon={<FilePlus2 className="w-4 h-4" />}
-                    onClick={() => setShowCreateModal(true)}
-                  >
-                    Create New
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    icon={<RefreshCw className="w-4 h-4" />}
-                    loading={scoreLoading}
-                    onClick={handleRescore}
-                  >
-                    Re-score
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    icon={<Sparkles className="w-4 h-4" />}
-                    loading={improveLoading}
-                    disabled={skillsOverLimit}
-                    onClick={() => handleImprove()}
-                  >
-                    Re-generate
-                  </Button>
-                  <ExportPanel ticket={ticket} improvements={improvements} score={score || undefined} />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<Search className="w-3.5 h-3.5" />}
-                    onClick={resetWorkspace}
-                  >
-                    New Ticket
-                  </Button>
+                {/* Action bar + detail level sub-row */}
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      icon={<Upload className="w-4 h-4" />}
+                      loading={syncLoading}
+                      onClick={handleSync}
+                    >
+                      Sync to Jira
+                    </Button>
+                    <Button
+                      icon={<FilePlus2 className="w-4 h-4" />}
+                      onClick={() => setShowCreateModal(true)}
+                    >
+                      Create New
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      icon={<RefreshCw className="w-4 h-4" />}
+                      loading={scoreLoading}
+                      onClick={handleRescore}
+                    >
+                      Re-score
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      icon={<Sparkles className="w-4 h-4" />}
+                      loading={improveLoading}
+                      disabled={skillsOverLimit}
+                      onClick={() => handleImprove()}
+                    >
+                      Re-generate
+                    </Button>
+                    <ExportPanel ticket={ticket} improvements={improvements} score={score || undefined} />
+                    {(ticket.parent || ticket.subtasks.length > 0 || ticket.linkedTickets.length > 0) && (
+                      <Button
+                        variant="secondary"
+                        icon={<Network className="w-4 h-4" />}
+                        onClick={() => setShowTicketMap(true)}
+                      >
+                        Ticket Map
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<Search className="w-3.5 h-3.5" />}
+                      onClick={resetWorkspace}
+                    >
+                      New Ticket
+                    </Button>
+                  </div>
+                  {detailLevelBar}
                 </div>
 
                 <UserSkillsPanel
@@ -1028,9 +1265,13 @@ export function TicketWorkspace() {
           onClose={() => setShowCreateModal(false)}
           onSuccess={(newKey) => {
             setShowCreateModal(false);
-            updateHistoryEntry(ticket.key, { syncedAt: new Date().toISOString() });
+            const syncedAt = new Date().toISOString();
+            updateHistoryEntry(ticket.key, { syncedAt });
             if (viewingHistoryId) {
-              api.history.markSynced(viewingHistoryId).catch(() => {});
+              api.history.markSynced(viewingHistoryId, {
+                syncedAt,
+                finalScore: score ? { overall: score.overall } : undefined,
+              }).catch(() => {});
             }
             if (automationTicketKey) {
               api.automation.dismiss(automationTicketKey).catch(() => {});
@@ -1039,6 +1280,37 @@ export function TicketWorkspace() {
             setHistoryRefreshKey((k) => k + 1);
           }}
         />
+      )}
+
+      {showTicketMap && ticket && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowTicketMap(false)} />
+          <div className="relative w-full max-w-4xl mx-4 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden" style={{ height: '70vh' }}>
+            <div className="flex items-center justify-between px-6 py-3 border-b border-gray-100 bg-gray-50">
+              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <Network className="w-4 h-4 text-blue-600" />
+                Ticket Map — {ticket.key}
+              </h2>
+              <button
+                onClick={() => setShowTicketMap(false)}
+                className="p-1 rounded-md hover:bg-gray-200 text-gray-500 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div style={{ height: 'calc(100% - 49px)' }}>
+              <TicketGraph
+                ticket={ticket}
+                onTicketClick={(key) => {
+                  setShowTicketMap(false);
+                  setTicketKey(key);
+                  resetWorkspace();
+                  setTicketKey(key);
+                }}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
