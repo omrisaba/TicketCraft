@@ -39,4 +39,5 @@ export interface AppConfig {
   mcpMaxRounds: number;
   mcpMaxToolCalls: number;
   cursorEnabled: boolean;
+  adminEmails: string[];
 }
