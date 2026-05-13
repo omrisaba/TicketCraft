@@ -78,6 +78,10 @@ export class SessionController {
           mcpMaxRounds: adminSettings.mcpMaxRounds,
           mcpMaxToolCalls: adminSettings.mcpMaxToolCalls,
           cursorEnabled: adminSettings.cursorEnabled,
+          adminEmails: (process.env.ADMIN_EMAILS || '')
+            .split(',')
+            .map((e) => e.trim().toLowerCase())
+            .filter(Boolean),
         },
       });
     } catch (err) {

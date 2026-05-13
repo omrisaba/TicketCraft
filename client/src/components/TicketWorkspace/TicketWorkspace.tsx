@@ -122,7 +122,7 @@ export function TicketWorkspace() {
   const [viewingHistoryId, setViewingHistoryId] = useState<string | null>(null);
   const [automationTicketKey, setAutomationTicketKey] = useState<string | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-  const isAdmin = jiraUser?.emailAddress === 'osabach@redhat.com';
+  const isAdmin = !!(jiraUser?.emailAddress && appConfig?.adminEmails?.includes(jiraUser.emailAddress.toLowerCase()));
 
   const [fetchLoading, setFetchLoading] = useState(false);
   const [scoreLoading, setScoreLoading] = useState(false);
