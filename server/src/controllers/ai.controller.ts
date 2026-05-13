@@ -46,6 +46,26 @@ function parseSkillsMarkdown(body: unknown): string | undefined {
 }
 
 export class AIController {
+  /**
+   * Sends a single space character every 15s to prevent proxies from
+   * dropping the connection during long-running Cursor agent calls.
+   * Call stop() before sending the real JSON response.
+   */
+  private startKeepAlive(res: Response): { stop: () => void } {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const interval = setInterval(() => {
+      if (!res.writableEnded) res.write(' ');
+    }, 15_000);
+
+    return {
+      stop: () => clearInterval(interval),
+    };
+  }
+
   private getAI(req: Request): GeminiAdapter {
     const { geminiApiKey, geminiModel, geminiTemperature } = getCredentials(req);
     return new GeminiAdapter(geminiApiKey, geminiModel, geminiTemperature);
@@ -129,8 +149,17 @@ export class AIController {
       };
 
       if (useCursor) {
-        const result = await this.improveWithCursor(req, ticket, repoUrl, improveBase);
-        res.json({ success: true, data: result });
+        const keepAlive = this.startKeepAlive(res);
+        try {
+          const result = await this.improveWithCursor(req, ticket, repoUrl, improveBase);
+          keepAlive.stop();
+          res.end(JSON.stringify({ success: true, data: result }));
+        } catch (err: any) {
+          keepAlive.stop();
+          const msg = err?.message || 'Cursor improve failed';
+          const code = err?.code || 'CURSOR_ERROR';
+          res.end(JSON.stringify({ success: false, error: { code, message: msg } }));
+        }
         return;
       }
 
@@ -182,10 +211,12 @@ export class AIController {
 
     const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
     const cursor = new CursorAdapter(admin.cursorApiKey, admin.cursorModel, repoDir);
+    const gemini = this.getAI(req);
 
     cursorActiveCount++;
     try {
-      const result = await cursor.improveTicket(ticket, options);
+      const analysis = await cursor.exploreForImprove(ticket, options);
+      const result = await gemini.formatImproveResult(ticket, analysis, options);
       return { ...result, cursorFallback: false };
     } finally {
       cursorActiveCount--;
@@ -210,8 +241,17 @@ export class AIController {
       };
 
       if (useCursor) {
-        const result = await this.composeWithCursor(req, freeText, repoUrl, composeOpts);
-        res.json({ success: true, data: result });
+        const keepAlive = this.startKeepAlive(res);
+        try {
+          const result = await this.composeWithCursor(req, freeText, repoUrl, composeOpts);
+          keepAlive.stop();
+          res.end(JSON.stringify({ success: true, data: result }));
+        } catch (err: any) {
+          keepAlive.stop();
+          const msg = err?.message || 'Cursor compose failed';
+          const code = err?.code || 'CURSOR_ERROR';
+          res.end(JSON.stringify({ success: false, error: { code, message: msg } }));
+        }
         return;
       }
 
@@ -264,10 +304,12 @@ export class AIController {
     const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
     const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
     const cursor = new CursorAdapter(admin.cursorApiKey, admin.cursorModel, repoDir);
+    const gemini = this.getAI(req);
 
     cursorActiveCount++;
     try {
-      const result = await cursor.composeTicket(freeText, options);
+      const analysis = await cursor.exploreForCompose(freeText, options);
+      const result = await gemini.formatComposeResult(freeText, analysis, options);
       return { ...result, cursorFallback: false };
     } finally {
       cursorActiveCount--;
@@ -293,8 +335,17 @@ export class AIController {
       };
 
       if (useCursor) {
-        const result = await this.breakdownWithCursor(req, ticket, repoUrl, breakdownOpts);
-        res.json({ success: true, data: result });
+        const keepAlive = this.startKeepAlive(res);
+        try {
+          const result = await this.breakdownWithCursor(req, ticket, repoUrl, breakdownOpts);
+          keepAlive.stop();
+          res.end(JSON.stringify({ success: true, data: result }));
+        } catch (err: any) {
+          keepAlive.stop();
+          const msg = err?.message || 'Cursor breakdown failed';
+          const code = err?.code || 'CURSOR_ERROR';
+          res.end(JSON.stringify({ success: false, error: { code, message: msg } }));
+        }
         return;
       }
 
@@ -348,10 +399,12 @@ export class AIController {
     const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
     const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
     const cursor = new CursorAdapter(admin.cursorApiKey, admin.cursorModel, repoDir);
+    const gemini = this.getAI(req);
 
     cursorActiveCount++;
     try {
-      return await cursor.breakdownTicket(ticket, options);
+      const analysis = await cursor.exploreForBreakdown(ticket, options);
+      return await gemini.formatBreakdownResult(ticket, analysis, options);
     } finally {
       cursorActiveCount--;
     }

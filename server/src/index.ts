@@ -1,5 +1,5 @@
 import { setMaxListeners } from 'events';
-setMaxListeners(30);
+setMaxListeners(50);
 
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';

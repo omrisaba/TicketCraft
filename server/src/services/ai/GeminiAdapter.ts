@@ -612,4 +612,197 @@ Return JSON:
     const text = await this.generateContent(prompt, true, 'generateDocument');
     return this.parseJson<GeneratedDocument>(text);
   }
+
+  async formatImproveResult(
+    ticket: Ticket,
+    analysis: string,
+    options?: { templateType?: TicketTemplateType; detailLevel?: DetailLevel },
+  ): Promise<{
+    improvedTicket: TicketChanges;
+    codeInsights: string;
+    generatedDocs: [];
+    mermaidDiagrams: [];
+  }> {
+    let templateInstructions = '';
+    if (options?.templateType) {
+      templateInstructions = `\nThis ticket should follow the "${options.templateType}" template:\n`
+        + '- bug: Include reproduction steps, expected vs actual behavior, environment info, severity.\n'
+        + '- feature: Include user story, acceptance criteria, scope, out of scope, technical notes.\n'
+        + '- spike: Include research questions, timebox, expected output, decision criteria.\n'
+        + '- tech-debt: Include current state, desired state, impact, migration plan, risks.\n';
+    }
+    const detailSection = detailLevelPromptSection(options?.detailLevel);
+
+    const prompt = `You are an expert Jira ticket writer. A software engineer has explored a codebase and produced the analysis below. Use it to create an exemplary, developer-ready Jira ticket.
+
+## ORIGINAL TICKET
+
+Key: ${ticket.key} | Type: ${ticket.issueType}
+Summary: ${ticket.summary}
+Description: ${ticket.description || '(empty)'}
+Labels: ${ticket.labels.length > 0 ? ticket.labels.join(', ') : '(none)'}
+Story Points: ${ticket.storyPoints ?? '(not set)'}
+Acceptance Criteria: ${ticket.acceptanceCriteria || '(none)'}
+${templateInstructions}${detailSection}
+
+## CODEBASE ANALYSIS
+
+${analysis}
+
+## INSTRUCTIONS
+
+Based on the analysis above, produce a JSON object with these exact keys:
+
+{
+  "improvedTicket": {
+    "summary": "One-line, specific, actionable summary",
+    "description": "Structured Markdown description with ## headings, referencing real files and code from the analysis",
+    "acceptanceCriteria": "Specific testable criteria using - [ ] checkboxes",
+    "labels": ["label1", "label2"],
+    "storyPoints": <number 1-13 or null>
+  },
+  "codeInsights": "2-3 sentences about what was found in the codebase"
+}
+
+Rules:
+- Every claim must be grounded in the analysis — do not invent file paths or APIs
+- Use clean Markdown: ## headings, **bold**, bullet lists, \`code\`
+- Acceptance criteria must be independently testable and specific
+- Labels should reflect the tech stack found in the analysis`;
+
+    const text = await this.generateContent(prompt, true, 'cursorImprove:format');
+    const parsed = this.parseJson<any>(text);
+    const improved = parsed.improvedTicket || parsed;
+
+    return {
+      improvedTicket: {
+        summary: improved.summary || ticket.summary,
+        description: improved.description || ticket.description || undefined,
+        acceptanceCriteria: improved.acceptanceCriteria || undefined,
+        labels: improved.labels || ticket.labels,
+        storyPoints: improved.storyPoints ?? ticket.storyPoints ?? undefined,
+      },
+      codeInsights: parsed.codeInsights || '',
+      generatedDocs: [],
+      mermaidDiagrams: [],
+    };
+  }
+
+  async formatComposeResult(
+    freeText: string,
+    analysis: string,
+    options?: { issueType?: string; templateType?: TicketTemplateType; detailLevel?: DetailLevel },
+  ): Promise<{
+    improvedTicket: TicketChanges;
+    codeInsights: string;
+    generatedDocs: [];
+    mermaidDiagrams: [];
+  }> {
+    let templateInstructions = '';
+    if (options?.templateType) {
+      templateInstructions = `\nThis ticket should follow the "${options.templateType}" template:\n`
+        + '- bug: Include reproduction steps, expected vs actual behavior, environment info, severity.\n'
+        + '- feature: Include user story, acceptance criteria, scope, out of scope, technical notes.\n'
+        + '- spike: Include research questions, timebox, expected output, decision criteria.\n'
+        + '- tech-debt: Include current state, desired state, impact, migration plan, risks.\n';
+    }
+    const issueTypeHint = options?.issueType ? `\nIssue type: ${options.issueType}` : '';
+    const detailSection = detailLevelPromptSection(options?.detailLevel);
+
+    const prompt = `You are an expert Jira ticket writer. A software engineer has explored a codebase and produced the analysis below. Use it to create a well-structured Jira ticket from the user's description.
+
+## USER'S DESCRIPTION
+${freeText}
+${issueTypeHint}${templateInstructions}${detailSection}
+
+## CODEBASE ANALYSIS
+
+${analysis}
+
+## INSTRUCTIONS
+
+Based on the analysis above, produce a JSON object with these exact keys:
+
+{
+  "improvedTicket": {
+    "summary": "Clear, actionable summary",
+    "description": "Structured Markdown description referencing real code from the analysis",
+    "acceptanceCriteria": "Specific criteria using - [ ] checkboxes",
+    "labels": ["label1", "label2"],
+    "storyPoints": <number 1-13 or null>
+  },
+  "codeInsights": "What was found in the codebase that informed this ticket"
+}
+
+Rules:
+- Every claim must be grounded in the analysis — do not invent file paths or APIs
+- Use clean Markdown in description
+- Acceptance criteria must be independently testable`;
+
+    const text = await this.generateContent(prompt, true, 'cursorCompose:format');
+    const parsed = this.parseJson<any>(text);
+    const improved = parsed.improvedTicket || parsed;
+
+    return {
+      improvedTicket: {
+        summary: improved.summary || '',
+        description: improved.description || undefined,
+        acceptanceCriteria: improved.acceptanceCriteria || undefined,
+        labels: improved.labels || [],
+        storyPoints: improved.storyPoints ?? undefined,
+      },
+      codeInsights: parsed.codeInsights || '',
+      generatedDocs: [],
+      mermaidDiagrams: [],
+    };
+  }
+
+  async formatBreakdownResult(
+    ticket: TicketChanges,
+    analysis: string,
+    options?: { subtaskType?: string; maxTasks?: number; detailLevel?: DetailLevel },
+  ): Promise<{ tasks: SubtaskProposal[]; rationale: string }> {
+    const maxTasks = options?.maxTasks ?? 8;
+    const subtaskType = options?.subtaskType || 'Sub-task';
+    const detailSection = detailLevelPromptSection(options?.detailLevel);
+
+    const prompt = `You are an expert at breaking down engineering work. A senior engineer has explored a codebase and produced the analysis below. Use it to create ${maxTasks} or fewer implementable ${subtaskType} tasks.
+
+## PARENT TICKET
+Summary: ${ticket.summary || '(no summary)'}
+Description: ${ticket.description || '(no description)'}
+${detailSection}
+
+## CODEBASE ANALYSIS
+
+${analysis}
+
+## INSTRUCTIONS
+
+Based on the analysis, produce a JSON object with these exact keys:
+
+{
+  "tasks": [
+    {
+      "id": "task-1",
+      "summary": "Clear task summary",
+      "description": "Description referencing real files from the analysis",
+      "acceptanceCriteria": "- [ ] Specific criteria",
+      "labels": ["label"],
+      "storyPoints": <number or null>,
+      "order": 1
+    }
+  ],
+  "rationale": "Brief explanation of the decomposition strategy"
+}
+
+Rules:
+- Each task must be independently implementable
+- Reference real files and modules from the analysis
+- Order tasks by dependency (foundations first)
+- Maximum ${maxTasks} tasks`;
+
+    const text = await this.generateContent(prompt, true, 'cursorBreakdown:format');
+    return this.parseJson<{ tasks: SubtaskProposal[]; rationale: string }>(text);
+  }
 }
