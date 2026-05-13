@@ -9,6 +9,8 @@ export interface HistorySnapshot {
   ticketSummary: string;
   ticket: Ticket;
   score: TicketScore;
+  /** The very first score before any improvements were applied. */
+  originalScore?: number;
   improvements: TicketChanges;
   annotations: Annotation[];
   repoUsage: RepoUsageSummary | null;
@@ -18,6 +20,7 @@ export interface HistorySnapshot {
   codeInsights: string | null;
   syncedAt: string | null;
   savedAt: string;
+  type?: 'improved' | 'created';
 }
 
 export interface HistoryListItem {
@@ -25,6 +28,9 @@ export interface HistoryListItem {
   ticketKey: string;
   ticketSummary: string;
   overallScore: number;
+  /** The initial score before improvements; undefined for legacy entries. */
+  originalScore?: number;
   syncedAt: string | null;
   savedAt: string;
+  type?: 'improved' | 'created';
 }

@@ -12,11 +12,14 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "npm run dev --workspace=server",
     "dev:client": "npm run dev --workspace=client",
-    "build": "npm run build --workspace=shared && npm run build --workspace=server && npm run build --workspace=client",
+    "openapi": "node scripts/generate-openapi.mjs",
+    "build:guide": "node scripts/build-user-guide.mjs",
+    "build": "npm run build:guide && npm run openapi && npm run build --workspace=shared && npm run build --workspace=server && npm run build --workspace=client",
     "generate-certs": "bash scripts/generate-certs.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
+    "marked": "^18.0.3",
     "typescript": "^5.7.3"
   }
 }

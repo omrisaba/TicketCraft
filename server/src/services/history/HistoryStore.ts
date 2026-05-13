@@ -48,9 +48,11 @@ export class HistoryStore {
             id: snap.id,
             ticketKey: snap.ticketKey,
             ticketSummary: snap.ticketSummary,
-            overallScore: snap.score.overall,
+            overallScore: snap.score?.overall ?? 0,
+            originalScore: snap.originalScore,
             syncedAt: snap.syncedAt,
             savedAt: snap.savedAt,
+            type: snap.type ?? 'improved',
           });
         } catch { /* skip corrupt files */ }
       }
@@ -75,10 +77,21 @@ export class HistoryStore {
     await fs.unlink(this.filePath(email, id)).catch(() => {});
   }
 
-  static async updateSynced(email: string, id: string, syncedAt: string): Promise<void> {
+  static async updateSynced(
+    email: string,
+    id: string,
+    syncedAt: string,
+    finalScore?: { overall: number },
+  ): Promise<void> {
     const snap = await this.load(email, id);
     if (snap) {
       snap.syncedAt = syncedAt;
+      if (finalScore) {
+        if (snap.originalScore === undefined) {
+          snap.originalScore = snap.score.overall;
+        }
+        snap.score = { ...snap.score, overall: finalScore.overall };
+      }
       await fs.writeFile(this.filePath(email, id), JSON.stringify(snap), 'utf-8');
     }
   }

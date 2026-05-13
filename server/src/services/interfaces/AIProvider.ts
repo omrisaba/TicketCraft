@@ -7,6 +7,8 @@ import type {
   GeneratedDocument,
   MermaidDiagram,
   TicketTemplateType,
+  DetailLevel,
+  SubtaskProposal,
 } from 'ticketcraft-shared';
 
 export interface AIProvider {
@@ -20,13 +22,45 @@ export interface AIProvider {
       linkedTickets?: Ticket[];
       repoContextPrompt?: string;
       referenceContent?: string;
-      /** Session-only Markdown; inlined into prompt only */
       skillsMarkdown?: string;
+      detailLevel?: DetailLevel;
     },
   ): Promise<{
     improvedTicket: TicketChanges;
     generatedDocs: GeneratedDocument[];
     mermaidDiagrams: MermaidDiagram[];
+  }>;
+
+  composeTicket(
+    freeText: string,
+    options?: {
+      issueType?: string;
+      templateType?: TicketTemplateType;
+      repoContextPrompt?: string;
+      referenceContent?: string;
+      skillsMarkdown?: string;
+      detailLevel?: DetailLevel;
+    },
+  ): Promise<{
+    improvedTicket: TicketChanges;
+    generatedDocs: GeneratedDocument[];
+    mermaidDiagrams: MermaidDiagram[];
+  }>;
+
+  breakdownTicket(
+    ticket: TicketChanges,
+    options?: {
+      issueType?: string;
+      subtaskType?: string;
+      maxTasks?: number;
+      repoContextPrompt?: string;
+      referenceContent?: string;
+      skillsMarkdown?: string;
+      detailLevel?: DetailLevel;
+    },
+  ): Promise<{
+    tasks: SubtaskProposal[];
+    rationale: string;
   }>;
 
   generateGuidingQuestions(

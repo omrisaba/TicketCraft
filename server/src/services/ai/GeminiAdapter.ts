@@ -7,15 +7,18 @@ import type {
   GeneratedDocument,
   MermaidDiagram,
   TicketTemplateType,
+  DetailLevel,
   DimensionScore,
   RefinementMessage,
   RefineResponse,
   RepoUsageSummary,
+  SubtaskProposal,
 } from 'ticketcraft-shared';
 import type { AIProvider } from '../interfaces/AIProvider.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { logBuffer } from '../logging/LogBuffer.js';
 import { skillsMarkdownPromptSection } from './skillsPromptSection.js';
+import { detailLevelPromptSection } from './detailLevelPrompt.js';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -193,6 +196,7 @@ Return JSON:
       repoContextPrompt?: string;
       referenceContent?: string;
       skillsMarkdown?: string;
+      detailLevel?: DetailLevel;
     },
   ): Promise<{
     improvedTicket: TicketChanges;
@@ -226,9 +230,10 @@ Return JSON:
       : '';
 
     const skillsSection = skillsMarkdownPromptSection(options?.skillsMarkdown);
+    const detailSection = detailLevelPromptSection(options?.detailLevel);
 
     const prompt = `You are a Jira ticket improvement expert. Improve the following ticket to make it exemplary quality.
-${templateInstructions}
+${templateInstructions}${detailSection}
 
 Current ticket:
 ${this.formatTicketForPrompt(ticket, options?.linkedTickets)}
@@ -269,6 +274,156 @@ Return JSON:
       'improveTicket',
       { skillsProvided: Boolean(sm), skillsLength: sm?.length ?? 0 },
     );
+    return this.parseJson(text);
+  }
+
+  async composeTicket(
+    freeText: string,
+    options?: {
+      issueType?: string;
+      templateType?: TicketTemplateType;
+      repoContextPrompt?: string;
+      referenceContent?: string;
+      skillsMarkdown?: string;
+      detailLevel?: DetailLevel;
+    },
+  ): Promise<{
+    improvedTicket: TicketChanges;
+    generatedDocs: GeneratedDocument[];
+    mermaidDiagrams: MermaidDiagram[];
+  }> {
+    let templateInstructions = '';
+    if (options?.templateType) {
+      templateInstructions = `\nThe ticket should follow the "${options.templateType}" template structure.
+- bug: Include reproduction steps, expected vs actual behavior, environment info, severity.
+- feature: Include user story, acceptance criteria, scope, out of scope, technical notes.
+- spike: Include research questions, timebox, expected output, decision criteria.
+- tech-debt: Include current state, desired state, impact, migration plan, risks.`;
+    }
+
+    const issueTypeHint = options?.issueType
+      ? `\nThe target issue type is "${options.issueType}". Tailor the structure and detail level accordingly.`
+      : '';
+
+    const repoSection = options?.repoContextPrompt
+      ? `\n\nProject context (reference real modules, services, and patterns from this codebase):\n${options.repoContextPrompt}\n`
+      : '';
+
+    const refSection = options?.referenceContent
+      ? `\n\nAdditional reference documents:\n${options.referenceContent}\n`
+      : '';
+
+    const skillsSection = skillsMarkdownPromptSection(options?.skillsMarkdown);
+    const detailSection = detailLevelPromptSection(options?.detailLevel);
+
+    const prompt = `You are a Jira ticket authoring expert. Create a well-structured, high-quality Jira ticket from the following rough description provided by the user.
+${templateInstructions}${issueTypeHint}${detailSection}
+
+User's description:
+${freeText}
+${repoSection}${refSection}${skillsSection}
+
+Create the ticket by:
+1. Writing a clear, specific, actionable summary
+2. Writing a thorough description with proper structure, context, and detail using standard Markdown (headings, bold, bullet/numbered lists, code blocks, tables where useful)
+3. Writing specific, testable acceptance criteria (use Markdown task lists with "- [ ]" syntax)
+4. Suggesting appropriate labels
+5. Estimating story points based on apparent complexity
+6. If helpful, generate supporting documents (technical specs, test plans, etc.)
+7. If helpful, generate Mermaid diagrams (flowcharts, sequence diagrams, architecture)
+
+IMPORTANT: All text fields MUST use clean, standard Markdown formatting. Do NOT use HTML tags.
+
+Return JSON:
+{
+  "improvedTicket": {
+    "summary": "<ticket summary>",
+    "description": "<full description in standard Markdown>",
+    "acceptanceCriteria": "<acceptance criteria using Markdown task lists>",
+    "labels": ["<suggested labels>"],
+    "storyPoints": <estimated points or null>
+  },
+  "generatedDocs": [
+    { "title": "<doc title>", "content": "<markdown content>", "format": "markdown" }
+  ],
+  "mermaidDiagrams": [
+    { "title": "<diagram title>", "syntax": "<valid mermaid syntax>" }
+  ]
+}`;
+
+    const text = await this.generateContent(prompt, true, 'composeTicket');
+    return this.parseJson(text);
+  }
+
+  async breakdownTicket(
+    ticket: TicketChanges,
+    options?: {
+      issueType?: string;
+      subtaskType?: string;
+      maxTasks?: number;
+      repoContextPrompt?: string;
+      referenceContent?: string;
+      skillsMarkdown?: string;
+      detailLevel?: DetailLevel;
+    },
+  ): Promise<{
+    tasks: SubtaskProposal[];
+    rationale: string;
+  }> {
+    const maxTasks = options?.maxTasks ?? 8;
+    const subtaskType = options?.subtaskType || 'Sub-task';
+
+    const repoSection = options?.repoContextPrompt
+      ? `\n\nProject context (reference real modules and files when suggesting tasks):\n${options.repoContextPrompt}\n`
+      : '';
+
+    const refSection = options?.referenceContent
+      ? `\n\nReference documents:\n${options.referenceContent}\n`
+      : '';
+
+    const skillsSection = skillsMarkdownPromptSection(options?.skillsMarkdown);
+    const detailSection = detailLevelPromptSection(options?.detailLevel);
+
+    const prompt = `You are a senior engineering lead. Break down the following Jira ticket into implementable ${subtaskType} tasks.
+${detailSection}
+
+Parent ticket:
+Summary: ${ticket.summary || '(no summary)'}
+Description: ${ticket.description || '(no description)'}
+Acceptance Criteria: ${ticket.acceptanceCriteria || '(none)'}
+Labels: ${ticket.labels?.join(', ') || '(none)'}
+Story Points: ${ticket.storyPoints ?? '(not set)'}
+Parent Issue Type: ${options?.issueType || 'Story'}
+${repoSection}${refSection}${skillsSection}
+
+Break this ticket into ${maxTasks} or fewer sub-tasks. Each task must:
+1. Be independently implementable and testable
+2. Have a clear, specific summary
+3. Have its own description with context and implementation guidance
+4. Have specific, testable acceptance criteria (use "- [ ]" syntax)
+5. Include appropriate labels
+6. Have a story point estimate (Fibonacci: 1, 2, 3, 5, 8)
+7. Be ordered logically (dependencies first)
+
+The sum of sub-task story points should approximately equal the parent's estimate (${ticket.storyPoints ?? 'use your judgment'}).
+
+Return JSON:
+{
+  "tasks": [
+    {
+      "id": "<unique_id like task-1>",
+      "summary": "<task summary>",
+      "description": "<task description in Markdown>",
+      "acceptanceCriteria": "<acceptance criteria with - [ ] checkboxes>",
+      "labels": ["<labels>"],
+      "storyPoints": <number or null>,
+      "order": <1-based execution order>
+    }
+  ],
+  "rationale": "<2-3 sentences explaining the decomposition strategy and ordering>"
+}`;
+
+    const text = await this.generateContent(prompt, true, 'breakdownTicket');
     return this.parseJson(text);
   }
 
@@ -350,6 +505,7 @@ Return JSON:
     conversationHistory: RefinementMessage[],
     repoContextPrompt?: string,
     referenceContent?: string,
+    skillsMarkdown?: string,
   ): Promise<RefineResponse> {
     const historySection = conversationHistory.length > 0
       ? '\n\nConversation so far:\n' + conversationHistory.map((m) =>
@@ -365,6 +521,8 @@ Return JSON:
       ? `\n\nReference documents:\n${referenceContent}\n`
       : '';
 
+    const skillsSection = skillsMarkdownPromptSection(skillsMarkdown);
+
     const prompt = `You are a Jira ticket refinement assistant. The user is iteratively improving a ticket through conversation. Apply their instruction to the current ticket state.
 
 Original ticket:
@@ -376,7 +534,7 @@ Description: ${currentImprovements.description || ticket.description || '(empty)
 Acceptance Criteria: ${currentImprovements.acceptanceCriteria || ticket.acceptanceCriteria || '(none)'}
 Labels: ${currentImprovements.labels?.join(', ') || ticket.labels.join(', ')}
 Story Points: ${currentImprovements.storyPoints ?? ticket.storyPoints ?? '(not set)'}
-${historySection}${repoSection}${refSection}
+${historySection}${repoSection}${refSection}${skillsSection}
 
 User instruction: "${instruction}"
 

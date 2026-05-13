@@ -1,4 +1,4 @@
-import type { Ticket, TicketChanges, LinkedTicket } from 'ticketcraft-shared';
+import type { Ticket, TicketChanges, LinkedTicket, JiraProject, JiraIssueType, JiraUser, BatchCreateResponse } from 'ticketcraft-shared';
 import type { IssueTracker, UserInfo } from '../interfaces/IssueTracker.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { markdownToAdf } from 'marklassian';
@@ -52,7 +52,7 @@ export class JiraClient implements IssueTracker {
 
   async getTicket(ticketKey: string): Promise<Ticket> {
     const data = await this.request<any>(
-      `/issue/${ticketKey}?expand=renderedFields&fields=summary,description,status,priority,assignee,reporter,labels,customfield_10016,issuetype,issuelinks,attachment,comment,created,updated`,
+      `/issue/${ticketKey}?expand=renderedFields&fields=summary,description,status,priority,assignee,reporter,labels,customfield_10016,issuetype,issuelinks,attachment,comment,created,updated,parent,subtasks`,
     );
 
     const fields = data.fields;
@@ -74,6 +74,18 @@ export class JiraClient implements IssueTracker {
       storyPoints: fields.customfield_10016 || null,
       issueType: fields.issuetype?.name || 'Task',
       acceptanceCriteria: null,
+      parent: fields.parent ? {
+        key: fields.parent.key,
+        summary: fields.parent.fields?.summary || '',
+        status: fields.parent.fields?.status?.name || 'Unknown',
+        issueType: fields.parent.fields?.issuetype?.name || 'Task',
+      } : null,
+      subtasks: (fields.subtasks || []).map((st: any) => ({
+        key: st.key,
+        summary: st.fields?.summary || '',
+        status: st.fields?.status?.name || 'Unknown',
+        issueType: st.fields?.issuetype?.name || 'Sub-task',
+      })),
       linkedTickets: (fields.issuelinks || []).map((link: any) => this.mapLinkedTicket(link)),
       attachments: (fields.attachment || []).map((att: any) => ({
         id: att.id,
@@ -119,6 +131,10 @@ export class JiraClient implements IssueTracker {
       updateFields.customfield_10016 = changes.storyPoints;
     }
 
+    if (ticketKey.split('-')[0].toUpperCase() === 'GENIE') {
+      updateFields.components = [{ name: 'UnifAI' }];
+    }
+
     await this.request(`/issue/${ticketKey}`, {
       method: 'PUT',
       body: JSON.stringify({ fields: updateFields }),
@@ -156,6 +172,7 @@ export class JiraClient implements IssueTracker {
     issueType: string;
     changes: TicketChanges;
     parentKey?: string;
+    assigneeAccountId?: string;
   }): Promise<{ key: string; id: string }> {
     const fields: any = {
       project: { key: opts.projectKey },
@@ -175,6 +192,10 @@ export class JiraClient implements IssueTracker {
     if (opts.changes.labels?.length) fields.labels = opts.changes.labels;
     if (opts.changes.storyPoints != null) fields.customfield_10016 = opts.changes.storyPoints;
     if (opts.parentKey) fields.parent = { key: opts.parentKey };
+    if (opts.assigneeAccountId) fields.assignee = { accountId: opts.assigneeAccountId };
+    if (opts.projectKey.toUpperCase() === 'GENIE') {
+      fields.components = [{ name: 'UnifAI' }];
+    }
 
     const data = await this.request<any>('/issue', {
       method: 'POST',
@@ -213,6 +234,95 @@ export class JiraClient implements IssueTracker {
       body: JSON.stringify({ jql, maxResults, fields: ['key'] }),
     });
     return (data.issues || []).map((issue: any) => issue.key as string);
+  }
+
+  async searchByJqlDetailed(
+    jql: string,
+    maxResults = 50,
+  ): Promise<{ key: string; summary: string; status: string; issueType: string; assignee: string | null }[]> {
+    const data = await this.request<any>('/search/jql', {
+      method: 'POST',
+      body: JSON.stringify({
+        jql,
+        maxResults,
+        fields: ['key', 'summary', 'status', 'issuetype', 'assignee'],
+      }),
+    });
+    return (data.issues || []).map((issue: any) => ({
+      key: issue.key as string,
+      summary: issue.fields?.summary || '',
+      status: issue.fields?.status?.name || 'Unknown',
+      issueType: issue.fields?.issuetype?.name || 'Task',
+      assignee: issue.fields?.assignee?.displayName || null,
+    }));
+  }
+
+  async getProjects(query?: string): Promise<JiraProject[]> {
+    const params = new URLSearchParams({ maxResults: '200', orderBy: 'key' });
+    if (query) params.set('query', query);
+    const data = await this.request<any>(`/project/search?${params}`);
+    return (data.values || []).map((p: any) => ({
+      key: p.key,
+      name: p.name,
+      avatarUrl: p.avatarUrls?.['48x48'] || null,
+    }));
+  }
+
+  async getIssueTypes(projectKey: string): Promise<JiraIssueType[]> {
+    const data = await this.request<any>(`/project/${projectKey}`);
+    return (data.issueTypes || []).map((t: any) => ({
+      id: t.id,
+      name: t.name,
+      subtask: t.subtask ?? false,
+      description: t.description || '',
+    }));
+  }
+
+  async getAssignableUsers(projectKey: string, query?: string): Promise<JiraUser[]> {
+    const params = new URLSearchParams({ project: projectKey, maxResults: '50' });
+    if (query) params.set('query', query);
+    const data = await this.request<any[]>(`/user/assignable/search?${params}`);
+    return (data || []).map((u: any) => ({
+      accountId: u.accountId,
+      displayName: u.displayName || u.name || 'Unknown',
+      avatarUrl: u.avatarUrls?.['48x48'] || null,
+    }));
+  }
+
+  async batchCreateTickets(opts: {
+    parentTicket: { projectKey: string; issueType: string; changes: TicketChanges; assigneeAccountId?: string };
+    subtasks: { issueType: string; changes: TicketChanges }[];
+  }): Promise<BatchCreateResponse> {
+    const parent = await this.createTicket({
+      projectKey: opts.parentTicket.projectKey,
+      issueType: opts.parentTicket.issueType,
+      changes: opts.parentTicket.changes,
+      assigneeAccountId: opts.parentTicket.assigneeAccountId,
+    });
+
+    const subtaskResults: { key: string; id: string; summary: string }[] = [];
+    const errors: { index: number; summary: string; error: string }[] = [];
+
+    for (let i = 0; i < opts.subtasks.length; i++) {
+      const st = opts.subtasks[i];
+      try {
+        const isSubtaskType = /^sub.?task$/i.test(st.issueType);
+        const created = await this.createTicket({
+          projectKey: opts.parentTicket.projectKey,
+          issueType: st.issueType,
+          changes: st.changes,
+          parentKey: isSubtaskType ? parent.key : undefined,
+        });
+        if (!isSubtaskType) {
+          try { await this.linkTickets(created.key, parent.key, 'Relates'); } catch { /* best-effort */ }
+        }
+        subtaskResults.push({ key: created.key, id: created.id, summary: st.changes.summary || '' });
+      } catch (err: any) {
+        errors.push({ index: i, summary: st.changes.summary || '', error: err.message || 'Unknown error' });
+      }
+    }
+
+    return { parent, subtasks: subtaskResults, errors };
   }
 
   async swapLabels(ticketKey: string, removeLabel: string, addLabel: string): Promise<void> {

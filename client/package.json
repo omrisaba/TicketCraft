@@ -10,11 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@xyflow/react": "^12.10.2",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.510.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-router-dom": "^7.6.0",
-    "lucide-react": "^0.510.0",
-    "clsx": "^2.1.1",
     "tailwind-merge": "^3.3.0",
     "ticketcraft-shared": "*"
   },

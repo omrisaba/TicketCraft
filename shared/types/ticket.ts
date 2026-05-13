@@ -1,3 +1,10 @@
+export interface TicketRef {
+  key: string;
+  summary: string;
+  status: string;
+  issueType: string;
+}
+
 export interface Ticket {
   id: string;
   key: string;
@@ -12,6 +19,8 @@ export interface Ticket {
   storyPoints: number | null;
   issueType: string;
   acceptanceCriteria: string | null;
+  parent: TicketRef | null;
+  subtasks: TicketRef[];
   linkedTickets: LinkedTicket[];
   attachments: Attachment[];
   comments: Comment[];

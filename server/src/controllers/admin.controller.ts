@@ -10,12 +10,17 @@ import {
   LOG_RETENTION_DAYS,
 } from '../services/logging/LogBuffer.js';
 
-const ADMIN_EMAIL = 'osabach@redhat.com';
+const ADMIN_EMAILS = new Set(
+  (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
+);
 const VALID_MODEL_IDS = new Set<string>(AVAILABLE_MODELS.map((m) => m.id));
 
 function assertAdmin(req: Request): void {
   const { jiraEmail } = getCredentials(req);
-  if (jiraEmail.toLowerCase() !== ADMIN_EMAIL) {
+  if (!ADMIN_EMAILS.has(jiraEmail.toLowerCase())) {
     throw new AppError(403, 'FORBIDDEN', 'Admin access required.');
   }
 }

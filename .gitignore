@@ -32,5 +32,8 @@ coverage/
 .parcel-cache/
 .turbo/
 
+# Generated user guide HTML (rebuilt from USER_GUIDE.md)
+client/public/user-guide.html
+
 # Draft storage
 server/data/

@@ -6,6 +6,7 @@ const router = Router();
 const controller = new AutomationController();
 
 router.get('/info', controller.info);
+router.post('/search', credentialExtractor, controller.search);
 router.post('/scan', credentialExtractor, controller.scan);
 router.get('/pending', credentialExtractor, controller.pending);
 router.get('/result/:ticketKey', credentialExtractor, controller.loadResult);

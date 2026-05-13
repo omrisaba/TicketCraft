@@ -12,7 +12,11 @@ RUN npm ci --workspaces
 COPY shared/ shared/
 COPY server/ server/
 COPY client/ client/
+COPY scripts/ scripts/
+COPY USER_GUIDE.md .
 
+RUN node scripts/build-user-guide.mjs
+RUN node scripts/generate-openapi.mjs
 RUN npm run build --workspace=client
 
 EXPOSE 3000 3001

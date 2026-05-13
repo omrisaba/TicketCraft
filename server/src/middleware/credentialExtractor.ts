@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { createHash } from 'crypto';
 import type { AuthenticatedRequest } from '../types/index.js';
 import type { GeminiModel } from 'ticketcraft-shared';
 import { AVAILABLE_MODELS } from 'ticketcraft-shared';
@@ -59,4 +60,63 @@ export function credentialExtractor(
   };
 
   next();
+}
+
+const verifiedCache = new Map<string, number>();
+const VERIFY_TTL = 5 * 60 * 1000;
+
+export function verifiedCredentialExtractor(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  credentialExtractor(req, res, (err?: unknown) => {
+    if (err) {
+      next(err);
+      return;
+    }
+
+    const { jiraEmail, jiraApiToken, jiraBaseUrl } =
+      (req as AuthenticatedRequest).credentials;
+
+    const cacheKey = createHash('sha256')
+      .update(`${jiraEmail}:${jiraApiToken}`)
+      .digest('hex');
+    const cached = verifiedCache.get(cacheKey);
+    if (cached && Date.now() - cached < VERIFY_TTL) {
+      next();
+      return;
+    }
+
+    const authHeader =
+      'Basic ' + Buffer.from(`${jiraEmail}:${jiraApiToken}`).toString('base64');
+
+    fetch(`${jiraBaseUrl}/rest/api/3/myself`, {
+      headers: { Authorization: authHeader },
+      signal: AbortSignal.timeout(10_000),
+    })
+      .then((resp) => {
+        if (!resp.ok) {
+          res.status(401).json({
+            success: false,
+            error: {
+              code: 'INVALID_CREDENTIALS',
+              message: 'Jira credentials are invalid.',
+            },
+          });
+          return;
+        }
+        verifiedCache.set(cacheKey, Date.now());
+        next();
+      })
+      .catch(() => {
+        res.status(401).json({
+          success: false,
+          error: {
+            code: 'VERIFICATION_FAILED',
+            message: 'Could not verify Jira credentials.',
+          },
+        });
+      });
+  });
 }

@@ -9,7 +9,9 @@ export const config = {
   host: process.env.HOST || '0.0.0.0',
 
   cors: {
-    origin: process.env.CORS_ORIGIN || true,
+    origin: process.env.CORS_ORIGIN
+      ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+      : false,
     credentials: true,
   },
 

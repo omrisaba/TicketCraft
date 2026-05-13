@@ -1,14 +1,14 @@
 import { Router } from 'express';
 import { AdminController } from '../controllers/admin.controller.js';
-import { credentialExtractor } from '../middleware/credentialExtractor.js';
+import { verifiedCredentialExtractor } from '../middleware/credentialExtractor.js';
 
 const router = Router();
 const controller = new AdminController();
 
-router.get('/settings', credentialExtractor, controller.load);
-router.put('/settings', credentialExtractor, controller.save);
-router.get('/cursor-models', credentialExtractor, controller.cursorModels);
-router.get('/logs', credentialExtractor, controller.logs);
-router.delete('/logs', credentialExtractor, controller.clearLogs);
+router.get('/settings', verifiedCredentialExtractor, controller.load);
+router.put('/settings', verifiedCredentialExtractor, controller.save);
+router.get('/cursor-models', verifiedCredentialExtractor, controller.cursorModels);
+router.get('/logs', verifiedCredentialExtractor, controller.logs);
+router.delete('/logs', verifiedCredentialExtractor, controller.clearLogs);
 
 export { router as adminRouter };

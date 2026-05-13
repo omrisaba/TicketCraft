@@ -9,7 +9,7 @@ const SETTINGS_PATH = path.resolve(__dirname, '../../../data/admin-settings.json
 const DEFAULTS: AdminSettings = {
   defaultModel: 'gemini-3.1-pro-preview',
   defaultTemperature: 0.3,
-  scanJql: 'reporter = currentUser() AND status = "Refinement" AND labels = "readyForTicketCraftRefinement"',
+  scanJql: 'project = "MYPROJECT" AND status = "To Do" ORDER BY created DESC',
   githubMcpUrl: '',
   gitlabMcpUrl: '',
   mcpMaxRounds: 5,

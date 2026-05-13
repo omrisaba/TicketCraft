@@ -28,6 +28,13 @@ export const upload = multer({
   },
 });
 
+const ALLOWED_FETCH_HOSTS = new Set([
+  'github.com',
+  'raw.githubusercontent.com',
+  'gitlab.com',
+  'bitbucket.org',
+]);
+
 export class RepoController {
   fetchContext = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -91,10 +98,30 @@ export class RepoController {
     }
   };
 
+  private validateFetchUrl(url: string): void {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new AppError(400, 'INVALID_URL', 'URL is not valid.');
+    }
+    if (parsed.protocol !== 'https:') {
+      throw new AppError(400, 'INVALID_URL', 'Only HTTPS URLs are allowed.');
+    }
+    if (!ALLOWED_FETCH_HOSTS.has(parsed.hostname)) {
+      throw new AppError(
+        400,
+        'BLOCKED_HOST',
+        `Host "${parsed.hostname}" is not in the allowed list.`,
+      );
+    }
+  }
+
   private async fetchSingleUrl(url: string): Promise<ReferenceLink> {
     const label = this.extractLabel(url);
     try {
       const rawUrl = this.toRawUrl(url);
+      this.validateFetchUrl(rawUrl);
 
       const res = await fetch(rawUrl, {
         headers: { 'User-Agent': 'TicketCraft' },
