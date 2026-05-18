@@ -5,6 +5,7 @@ import { config } from '../config/index.js';
 import { JiraClient } from '../services/jira/JiraClient.js';
 import { GeminiAdapter } from '../services/ai/GeminiAdapter.js';
 import { AdminStore } from '../services/admin/AdminStore.js';
+import { usageTracker } from '../services/usage/UsageTracker.js';
 
 const VALID_MODEL_IDS = new Set<string>(AVAILABLE_MODELS.map((m: { id: string }) => m.id));
 
@@ -49,6 +50,10 @@ export class SessionController {
       }
 
       const valid = validationErrors.length === 0;
+
+      if (valid) {
+        try { usageTracker.record(jiraEmail.trim().toLowerCase(), 'login'); } catch { /* non-critical */ }
+      }
 
       res.json({
         success: true,

@@ -10,5 +10,6 @@ router.put('/settings', verifiedCredentialExtractor, controller.save);
 router.get('/cursor-models', verifiedCredentialExtractor, controller.cursorModels);
 router.get('/logs', verifiedCredentialExtractor, controller.logs);
 router.delete('/logs', verifiedCredentialExtractor, controller.clearLogs);
+router.get('/usage', verifiedCredentialExtractor, controller.usage);
 
 export { router as adminRouter };

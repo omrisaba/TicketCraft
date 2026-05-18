@@ -235,6 +235,7 @@ export const api = {
     },
     clearLogs: () => request('/api/admin/logs', { method: 'DELETE' }),
     cursorModels: () => request('/api/admin/cursor-models'),
+    usage: () => request('/api/admin/usage'),
   },
 
   export: {

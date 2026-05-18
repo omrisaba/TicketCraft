@@ -10,6 +10,9 @@ import { TemplateSelector } from '../TemplateSelector/TemplateSelector';
 import { RepoConnector } from '../RepoConnector/RepoConnector';
 import { ReferenceLinks } from '../ReferenceLinks/ReferenceLinks';
 import { BreakdownPanel } from '../BreakdownPanel/BreakdownPanel';
+import { AdminSettings } from '../AdminSettings/AdminSettings';
+import { LogsPanel } from '../LogsPanel/LogsPanel';
+import { UsageDashboard } from '../UsageDashboard/UsageDashboard';
 import { Badge } from '../ui/Badge';
 import type {
   Ticket,
@@ -30,12 +33,13 @@ import { DETAIL_LEVEL_META, suggestedDetailLevel } from 'ticketcraft-shared';
 import {
   Sparkles, Send, RefreshCw, ArrowLeft,
   Layers, CheckCircle2, Loader2, PenLine, BookOpen,
+  Settings, ScrollText, BarChart3,
 } from 'lucide-react';
 
 type ComposeStep = 'setup' | 'composing' | 'review' | 'breaking' | 'breakdown' | 'creating' | 'done';
 
 export function ComposeWorkspace() {
-  const { repoContext, appConfig, credentials, setGeminiModel, setGeminiTemperature, geminiTemperature, addHistoryEntry } = useSession();
+  const { repoContext, appConfig, credentials, jiraUser, setGeminiModel, setGeminiTemperature, geminiTemperature, addHistoryEntry } = useSession();
 
   // Setup state
   const [projects, setProjects] = useState<JiraProject[]>([]);
@@ -64,6 +68,11 @@ export function ComposeWorkspace() {
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [useCursor, setUseCursor] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const [showUsage, setShowUsage] = useState(false);
+
+  const isAdmin = !!(jiraUser?.emailAddress && appConfig?.adminEmails?.includes(jiraUser.emailAddress.toLowerCase()));
 
   useEffect(() => {
     setLoadingProjects(true);
@@ -348,9 +357,32 @@ export function ComposeWorkspace() {
                 </select>
               </div>
             )}
+            {isAdmin && (
+              <>
+                <button onClick={() => { setShowUsage(!showUsage); if (!showUsage) { setShowLogs(false); setShowAdmin(false); } }} className="p-1.5 rounded hover:bg-gray-100 transition-colors" title="Usage Analytics">
+                  <BarChart3 className="w-4 h-4 text-gray-500" />
+                </button>
+                <button onClick={() => { setShowLogs(!showLogs); if (!showLogs) { setShowAdmin(false); setShowUsage(false); } }} className="p-1.5 rounded hover:bg-gray-100 transition-colors" title="System Logs">
+                  <ScrollText className="w-4 h-4 text-gray-500" />
+                </button>
+                <button onClick={() => { setShowAdmin(!showAdmin); if (!showAdmin) { setShowLogs(false); setShowUsage(false); } }} className="p-1.5 rounded hover:bg-gray-100 transition-colors" title="Admin Settings">
+                  <Settings className="w-4 h-4 text-gray-500" />
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
+
+      {showAdmin && isAdmin && (
+        <AdminSettings onClose={() => setShowAdmin(false)} />
+      )}
+      {showLogs && isAdmin && (
+        <LogsPanel onClose={() => setShowLogs(false)} />
+      )}
+      {showUsage && isAdmin && (
+        <UsageDashboard onClose={() => setShowUsage(false)} />
+      )}
 
       {error && (
         <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">

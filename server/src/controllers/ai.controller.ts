@@ -9,6 +9,7 @@ import { McpAgent } from '../services/mcp/McpAgent.js';
 import { RepoService } from '../services/repo/RepoService.js';
 import { RepoCloneStore } from '../services/repo/RepoCloneStore.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { usageTracker } from '../services/usage/UsageTracker.js';
 
 interface McpEnrichResult {
   prompt: string | undefined;
@@ -131,6 +132,7 @@ export class AIController {
       if (useCursor) {
         const result = await this.improveWithCursor(req, ticket, repoUrl, improveBase);
         res.json({ success: true, data: result });
+        try { usageTracker.record(getCredentials(req).jiraEmail, 'improve'); } catch { /* non-critical */ }
         return;
       }
 
@@ -142,6 +144,7 @@ export class AIController {
       });
 
       res.json({ success: true, data: { ...result, mcpStats } });
+      try { usageTracker.record(getCredentials(req).jiraEmail, 'improve'); } catch { /* non-critical */ }
     } catch (err) {
       next(err);
     }
@@ -212,6 +215,7 @@ export class AIController {
       if (useCursor) {
         const result = await this.composeWithCursor(req, freeText, repoUrl, composeOpts);
         res.json({ success: true, data: result });
+        try { usageTracker.record(getCredentials(req).jiraEmail, 'compose'); } catch { /* non-critical */ }
         return;
       }
 
@@ -230,6 +234,7 @@ export class AIController {
       });
 
       res.json({ success: true, data: { ...result, mcpStats } });
+      try { usageTracker.record(getCredentials(req).jiraEmail, 'compose'); } catch { /* non-critical */ }
     } catch (err) {
       next(err);
     }

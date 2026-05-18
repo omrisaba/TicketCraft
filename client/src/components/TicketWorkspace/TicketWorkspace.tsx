@@ -22,6 +22,7 @@ import { ReferenceLinks } from '../ReferenceLinks/ReferenceLinks';
 import { PendingReviews } from '../PendingReviews/PendingReviews';
 import { AdminSettings } from '../AdminSettings/AdminSettings';
 import { LogsPanel } from '../LogsPanel/LogsPanel';
+import { UsageDashboard } from '../UsageDashboard/UsageDashboard';
 import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
 import { TicketGraph } from '../TicketGraph/TicketGraph';
 import { UserSkillsPanel, isSkillsOverLimit } from './UserSkillsPanel';
@@ -69,6 +70,7 @@ import {
   Layers,
   Info,
   BookOpen,
+  BarChart3,
 } from 'lucide-react';
 
 type WorkspaceStep = 'fetch' | 'scored' | 'improving' | 'review';
@@ -114,6 +116,7 @@ export function TicketWorkspace() {
   const [showHistory, setShowHistory] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [showUsage, setShowUsage] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showTicketMap, setShowTicketMap] = useState(false);
   const [useCursor, setUseCursor] = useState(false);
@@ -806,10 +809,13 @@ export function TicketWorkspace() {
             </Button>
             {isAdmin && (
               <>
-                <Button variant="ghost" size="sm" onClick={() => { setShowLogs(!showLogs); if (!showLogs) setShowAdmin(false); }} aria-pressed={showLogs}>
+                <Button variant="ghost" size="sm" onClick={() => { setShowUsage(!showUsage); if (!showUsage) { setShowLogs(false); setShowAdmin(false); } }} aria-pressed={showUsage}>
+                  <BarChart3 className="w-4 h-4" />
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => { setShowLogs(!showLogs); if (!showLogs) { setShowAdmin(false); setShowUsage(false); } }} aria-pressed={showLogs}>
                   <ScrollText className="w-4 h-4" />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => { setShowAdmin(!showAdmin); if (!showAdmin) setShowLogs(false); }}>
+                <Button variant="ghost" size="sm" onClick={() => { setShowAdmin(!showAdmin); if (!showAdmin) { setShowLogs(false); setShowUsage(false); } }}>
                   <Settings className="w-4 h-4" />
                 </Button>
               </>
@@ -836,9 +842,12 @@ export function TicketWorkspace() {
         <AdminSettings onClose={() => setShowAdmin(false)} />
       )}
 
-      {/* Logs panel */}
       {showLogs && isAdmin && (
         <LogsPanel onClose={() => setShowLogs(false)} />
+      )}
+
+      {showUsage && isAdmin && (
+        <UsageDashboard onClose={() => setShowUsage(false)} />
       )}
 
       {/* History dropdown */}

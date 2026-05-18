@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { getCredentials, getParam } from '../types/index.js';
 import { JiraClient } from '../services/jira/JiraClient.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { usageTracker } from '../services/usage/UsageTracker.js';
 
 export class JiraController {
   private getClient(req: Request): JiraClient {
@@ -46,6 +47,7 @@ export class JiraController {
       await client.updateTicket(ticketKey.toUpperCase(), changes);
 
       res.json({ success: true, data: { message: 'Ticket updated successfully' } });
+      try { usageTracker.record(getCredentials(req).jiraEmail, 'sync_to_jira', ticketKey.toUpperCase()); } catch { /* non-critical */ }
     } catch (err) {
       next(err);
     }
@@ -82,6 +84,7 @@ export class JiraController {
       }
 
       res.json({ success: true, data: { key: created.key, id: created.id } });
+      try { usageTracker.record(getCredentials(req).jiraEmail, 'create_in_jira', created.key); } catch { /* non-critical */ }
     } catch (err) {
       next(err);
     }
@@ -141,6 +144,16 @@ export class JiraController {
       const client = this.getClient(req);
       const result = await client.batchCreateTickets({ parentTicket, subtasks });
       res.json({ success: true, data: result });
+      try {
+        const email = getCredentials(req).jiraEmail;
+        const batchId = `batch_${Date.now()}`;
+        if (result.parent?.key) {
+          usageTracker.record(email, 'create_in_jira', result.parent.key, { batchId });
+        }
+        for (const st of result.subtasks || []) {
+          if (st.key) usageTracker.record(email, 'create_in_jira', st.key, { batchId });
+        }
+      } catch { /* non-critical */ }
     } catch (err) {
       next(err);
     }

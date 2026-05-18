@@ -9,6 +9,7 @@ import {
   type LogCategory,
   LOG_RETENTION_DAYS,
 } from '../services/logging/LogBuffer.js';
+import { usageTracker } from '../services/usage/UsageTracker.js';
 
 const ADMIN_EMAILS = new Set(
   (process.env.ADMIN_EMAILS || '')
@@ -120,6 +121,16 @@ export class AdminController {
       assertAdmin(req);
       logBuffer.clear();
       res.json({ success: true, data: { message: 'Logs cleared.' } });
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  usage = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      assertAdmin(req);
+      const stats = usageTracker.query();
+      res.json({ success: true, data: stats });
     } catch (err) {
       next(err);
     }
