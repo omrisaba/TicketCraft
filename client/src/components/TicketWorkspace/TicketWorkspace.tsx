@@ -637,7 +637,7 @@ export function TicketWorkspace() {
 
   const handleDetailLevelChange = (lvl: DetailLevel) => {
     setDetailLevel(lvl);
-    if (lvl === 'low' && !useCursor && appConfig?.cursorEnabled) {
+    if (lvl === 'low' && !useCursor && appConfig?.cursorEnabled && credentials?.cursorApiKey) {
       setAiNudge('cursor');
     } else if (lvl !== 'low' && useCursor) {
       setAiNudge('gemini');
@@ -770,7 +770,7 @@ export function TicketWorkspace() {
                   {appConfig.availableModels.map((m) => (
                     <option key={m.id} value={m.id}>{m.label}</option>
                   ))}
-                  {appConfig.cursorEnabled && (
+                  {appConfig.cursorEnabled && credentials?.cursorApiKey && (
                     <option value="cursor">Cursor (codebase-aware)</option>
                   )}
                 </select>

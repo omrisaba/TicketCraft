@@ -9,7 +9,6 @@ export interface AdminSettings {
   mcpMaxRounds: number;
   mcpMaxToolCalls: number;
   cursorEnabled: boolean;
-  cursorApiKey: string;
   cursorModel: string;
   cursorMaxConcurrent: number;
 }

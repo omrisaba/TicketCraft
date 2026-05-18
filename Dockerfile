@@ -1,5 +1,7 @@
 FROM node:20-alpine
 
+RUN apk add --no-cache git
+
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -7,7 +9,7 @@ COPY server/package.json server/
 COPY client/package.json client/
 COPY shared/package.json shared/
 
-RUN npm ci --workspaces
+RUN npm ci
 
 COPY shared/ shared/
 COPY server/ server/

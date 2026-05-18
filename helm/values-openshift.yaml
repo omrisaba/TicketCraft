@@ -4,7 +4,7 @@
 replicaCount: 1
 
 image:
-  repository: ticketcraft
+  repository: images.paas.redhat.com/unifai/ticketcraft
   pullPolicy: Always
   tag: "latest"
 
@@ -41,16 +41,19 @@ env:
   GEMINI_API_KEY: ""
   GEMINI_DEFAULT_MODEL: "gemini-3.1-pro-preview"
   JIRA_BASE_URL: "https://redhat.atlassian.net"
+  ADMIN_EMAILS: "osabach@redhat.com,yhabushi@redhat.com"
   PORT: "3001"
   HTTP_PORT: "3000"
+  HOME: "/tmp"
   HOST: "0.0.0.0"
   SESSION_TIMEOUT_MS: "1800000"
+  TRUST_PROXY: "true"
   RATE_LIMIT_MAX: "500"
   AUTOMATION_TRIGGER_LABEL: "readyForTicketCraftRefinement"
   AUTOMATION_DONE_LABEL: "processedByTicketCraft"
 
 envSecret:
-  enabled: true
+  enabled: false
   secretName: "ticketcraft-secrets"
   keys:
     - GEMINI_API_KEY
@@ -60,16 +63,22 @@ tls:
 
 persistence:
   enabled: true
-  storageClass: ""
+  keepPvc: true
+  storageClass: "aws-ebs"
   accessModes:
     - ReadWriteOnce
   size: 1Gi
+  labels:
+    paas.redhat.com/appcode: TAG-001
+  annotations:
+    kubernetes.io/reclaimPolicy: "Delete"
 
 # OpenShift Route
 route:
   enabled: true
   host: ""
-  annotations: {}
+  annotations:
+    haproxy.router.openshift.io/timeout: "600s"
   termination: edge
   insecureEdgeTerminationPolicy: Redirect
 

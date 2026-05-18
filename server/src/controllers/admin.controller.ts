@@ -58,7 +58,7 @@ export class AdminController {
 
       const current = await AdminStore.load();
       const {
-        cursorEnabled: cEnabled, cursorApiKey: cKey, cursorModel: cModel, cursorMaxConcurrent: cMax,
+        cursorEnabled: cEnabled, cursorModel: cModel, cursorMaxConcurrent: cMax,
       } = req.body;
 
       const updated: AdminSettings = {
@@ -70,7 +70,6 @@ export class AdminController {
         mcpMaxRounds: mcpMaxRounds != null ? Math.max(1, Math.min(20, parseInt(mcpMaxRounds, 10) || 5)) : current.mcpMaxRounds,
         mcpMaxToolCalls: mcpMaxToolCalls != null ? Math.max(1, Math.min(50, parseInt(mcpMaxToolCalls, 10) || 10)) : current.mcpMaxToolCalls,
         cursorEnabled: cEnabled != null ? !!cEnabled : current.cursorEnabled,
-        cursorApiKey: cKey != null ? cKey.trim() : current.cursorApiKey,
         cursorModel: cModel != null ? cModel.trim() || 'auto' : current.cursorModel,
         cursorMaxConcurrent: cMax != null ? Math.max(1, Math.min(30, parseInt(cMax, 10) || 8)) : current.cursorMaxConcurrent,
       };
@@ -103,13 +102,13 @@ export class AdminController {
   cursorModels = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       assertAdmin(req);
-      const admin = await AdminStore.load();
-      if (!admin.cursorApiKey) {
+      const { cursorApiKey } = getCredentials(req);
+      if (!cursorApiKey) {
         res.json({ success: true, data: [] });
         return;
       }
       const { Cursor } = await import('@cursor/sdk');
-      const models = await Cursor.models.list({ apiKey: admin.cursorApiKey });
+      const models = await Cursor.models.list({ apiKey: cursorApiKey });
       res.json({ success: true, data: models });
     } catch (err) {
       next(err);

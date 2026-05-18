@@ -338,7 +338,7 @@ export function ComposeWorkspace() {
               {appConfig.availableModels.map((m) => (
                 <option key={m.id} value={m.id}>{m.label}</option>
               ))}
-              {appConfig.cursorEnabled && (
+              {appConfig.cursorEnabled && credentials?.cursorApiKey && (
                 <option value="cursor">Cursor (codebase-aware)</option>
               )}
             </select>

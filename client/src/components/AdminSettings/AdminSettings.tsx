@@ -191,19 +191,6 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
               </div>
               {settings.cursorEnabled && (
                 <div className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-gray-700">Cursor API Key</label>
-                    <input
-                      type="password"
-                      value={settings.cursorApiKey}
-                      onChange={(e) => setSettings({ ...settings, cursorApiKey: e.target.value })}
-                      placeholder="cursor_..."
-                      className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                    <p className="text-[11px] text-gray-400">
-                      From <a href="https://cursor.com/dashboard/cloud-agents" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">cursor.com/dashboard</a>. Stored server-side only.
-                    </p>
-                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-gray-700">Cursor Model</label>
@@ -232,7 +219,7 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
                 </div>
               )}
               <p className="text-[11px] text-gray-400">
-                When enabled, "Cursor" appears as an AI engine option. Requires a connected repo. Uses local Cursor installation.
+                When enabled, users who provide their own Cursor API key at login will see "Cursor" as an AI engine option.
               </p>
             </div>
 

@@ -22,6 +22,10 @@ import { setupSwagger } from './openapi/swagger.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
+if (config.trustProxy) {
+  app.set('trust proxy', 1);
+}
+
 app.use((req, res, next) => {
   if (req.path.startsWith('/api/docs') || req.path.startsWith('/api/openapi.json')) {
     return next();
