@@ -2,7 +2,7 @@
 
 ## 1. Introduction
 
-TicketCraft is an AI-powered Jira ticket quality tool. It uses Google Gemini to analyze your Jira tickets, score them across multiple quality dimensions, ask guiding questions, rewrite descriptions and acceptance criteria, suggest story points, and sync the approved improvements back to Jira.
+TicketCraft is an AI-powered Jira ticket quality tool. It uses Google Gemini to analyze your Jira tickets, score them across multiple quality dimensions, ask guiding questions, rewrite descriptions and acceptance criteria, suggest story points, and sync the approved improvements back to Jira. Optionally, it can leverage Cursor agents and MCP-based repository context for code-aware improvements.
 
 **What you can do with TicketCraft:**
 
@@ -11,10 +11,13 @@ TicketCraft is an AI-powered Jira ticket quality tool. It uses Google Gemini to 
 - Improve ticket descriptions, acceptance criteria, labels, and story points with one click
 - Review changes in a side-by-side diff view with AI-written annotations explaining each change
 - Refine improvements through a conversational chat interface
+- Provide session-only rules (coding standards, team conventions) that guide AI output
 - Export improved tickets as Markdown
 - Push approved changes directly back to Jira
 - Create new Jira tickets from improvements
+- Compose brand new tickets from a rough description and break them into subtasks
 - Connect repository context (GitHub/GitLab) for code-aware improvements
+- Use Cursor agents for deep codebase exploration during improvements
 
 ---
 
@@ -41,16 +44,25 @@ On the Session Start screen you will see:
 - **Jira API Token** — enter your personal Jira API token
 - **Gemini Model** — select from the dropdown (the admin's default is pre-selected)
 
+**Optional credentials (expandable):**
+
+- **GitHub Token** — a personal access token for accessing private GitHub repositories (used for repository context features)
+- **GitLab Token** — a personal access token for accessing private GitLab repositories
+- **Cursor API Key** — enables Cursor agent integration for code-aware improvements (requires the admin to enable Cursor)
+
 **Loading credentials from a file (optional):** You can click "Load from File" to select a local JSON file containing your credentials. The file is read entirely in the browser and is never uploaded to the server. The expected format is:
 
-```
+```json
 {
   "jiraEmail": "you@company.com",
-  "jiraApiToken": "your-token-here",
-  "githubToken": "optional",
-  "gitlabToken": "optional"
+  "jiraApiToken": "your-jira-api-token",
+  "githubToken": "",
+  "gitlabToken": "",
+  "cursorApiKey": ""
 }
 ```
+
+You can also click "Download Template" to get an empty template file with all supported fields.
 
 ### Step 3: Validate and Enter
 
@@ -111,6 +123,8 @@ Click **Improve** (or **Improve with Answers** if you answered guiding questions
 
 **Detail Level:** You can set the detail level (high, medium, low) to control how verbose the improvements are.
 
+**Using Cursor (optional):** If you have provided a Cursor API Key and connected a repository, you can toggle the **Use Cursor** option. This sends the ticket to a Cursor agent that explores the cloned repository for relevant code context before generating improvements. The AI produces more technically accurate results because it can reference actual code structure, naming conventions, and architecture. If Cursor is unavailable or at capacity, the system automatically falls back to standard Gemini-only improvement.
+
 ### 4.4 Review Changes (Diff View)
 
 After improvement, the **Diff View** shows a side-by-side comparison of the original and improved versions for each field:
@@ -155,6 +169,7 @@ TicketCraft lets you create brand new Jira tickets from a rough description — 
 6. **Template** *(optional)* — select a template (Bug, Feature, Spike, Tech Debt) to guide the structure of the generated ticket.
 7. **Repository** *(optional)* — connect a GitHub or GitLab repository for code-aware generation.
 8. **Reference Files** *(optional)* — add URLs or upload local files as additional context for the AI.
+9. **User Skills** *(optional)* — provide Markdown rules (coding standards, team conventions) to guide the AI's output.
 
 Click **Generate Ticket** to submit.
 
@@ -211,11 +226,40 @@ Connect a source code repository to give the AI awareness of your codebase:
 
 This context makes improvements more technically accurate — the AI can reference actual code structure, naming conventions, and architecture in its suggestions.
 
-### 6.3 Reference Links
+**MCP-enhanced context:** If the administrator has configured MCP (Model Context Protocol) server URLs for GitHub or GitLab, TicketCraft runs an agentic loop that uses MCP tools to gather deeper repository context. This happens automatically when a repo is connected — no additional user action is required. After scoring or improvement, you may see an **MCP Usage Card** showing which tools were called and how many rounds the agent used.
 
-Add external URLs (documentation pages, design docs, RFCs) to the **Reference Links** panel. TicketCraft fetches the content from these URLs and includes it in the AI prompts. This is useful when a ticket references external requirements or specifications.
+### 6.3 Cursor Agent Integration
 
-### 6.4 Ticket Scanner (Pending Reviews)
+If the administrator has enabled Cursor integration and you have provided a Cursor API Key at session start, you can use Cursor agents for code-aware AI operations:
+
+- When improving, composing, or breaking down tickets, toggle the **Use Cursor** option.
+- A Cursor agent clones the connected repository and explores the codebase to understand relevant code structure, patterns, and architecture.
+- The analysis is fed into Gemini to produce more technically grounded improvements.
+- If Cursor is at capacity or unavailable, the system falls back to standard Gemini-only processing automatically.
+
+The **Repo Usage Card** in the improvement view shows how repository context (from MCP or Cursor) influenced the AI's output.
+
+### 6.4 Reference Links & File Uploads
+
+Add external context to improve AI output quality:
+
+- **URLs** — Add documentation pages, design docs, RFCs, or any web content to the **Reference Links** panel. TicketCraft fetches the content from these URLs and includes it in the AI prompts.
+- **File uploads** — Upload local files (up to 10 at a time) directly from your computer. Files are sent to the server for content extraction and included as reference context.
+
+This is useful when a ticket references external requirements, specifications, or internal documentation that the AI wouldn't otherwise have access to.
+
+### 6.5 User Skills
+
+The **User Skills** panel lets you provide session-only Markdown rules that are inlined into AI prompts. Use this for:
+
+- Team coding standards and conventions
+- Domain-specific terminology definitions
+- Output formatting preferences
+- Project-specific guidelines
+
+Skills are held in browser memory for the session only — they are not saved with drafts or history. If a rule conflicts with producing a correct, Jira-ready ticket, the AI will prefer accuracy.
+
+### 6.6 Ticket Scanner (Pending Reviews)
 
 The Ticket Scanner lets you batch-process multiple tickets:
 
@@ -225,7 +269,7 @@ The Ticket Scanner lets you batch-process multiple tickets:
 
 This is useful for sprint grooming or backlog refinement sessions.
 
-### 6.5 Automation
+### 6.7 Automation
 
 TicketCraft supports label-driven automation for hands-off refinement:
 
@@ -234,21 +278,29 @@ TicketCraft supports label-driven automation for hands-off refinement:
 
 Ask your administrator about the specific labels configured for your instance.
 
-### 6.6 Session History
+### 6.8 Session History
 
 The header displays a **History** dropdown listing all tickets you've improved during the current session. Click any entry to revisit its score and improvements. History is persisted on the server, so it survives page refreshes within the same session.
 
-### 6.7 Drafts
+### 6.9 Drafts
 
 TicketCraft auto-saves your work as you go. If you navigate away or your session times out mid-improvement, the next time you load the same ticket, you'll be offered the option to **resume from your draft** or start fresh.
 
-### 6.8 Ticket Graph
+### 6.10 Ticket Graph
 
 The **Ticket Map** provides a visual graph of the current ticket's relationships — parent, subtasks, and linked issues — rendered as an interactive node diagram. Click any node to navigate to that ticket.
 
-### 6.9 Create New Ticket
+### 6.11 Create New Ticket
 
 From the improvement view, click **Create New** to open a modal that lets you create a brand new Jira issue populated with the improved content. Choose the project, issue type, and other fields before submitting.
+
+### 6.12 Admin Features
+
+Users whose email address is listed in the server's `ADMIN_EMAILS` configuration have access to additional features in the UI header:
+
+- **Admin Settings** — configure the default Gemini model, temperature, automation labels, MCP server URLs, and Cursor integration settings at runtime without restarting the server.
+- **Logs Panel** — view and clear server-side logs (LLM calls, errors, MCP activity).
+- **Usage Dashboard** — view per-user usage statistics including login count, improvements, compositions, syncs, and ticket creations.
 
 ---
 
@@ -283,10 +335,17 @@ From the improvement view, click **Create New** to open a modal that lets you cr
 ### AI improvements seem generic
 
 - Try connecting a **repository** for code-aware context.
-- Add **reference links** to relevant documentation or design docs.
+- Add **reference links** or **upload files** with relevant documentation or design docs.
 - Use **guiding questions** to provide domain-specific context the AI wouldn't otherwise have.
 - Select an appropriate **template** (Bug, Feature, Spike, Tech Debt) to guide the output structure.
 - Increase the **detail level** to "high" for more thorough analysis.
+- Add **user skills** with team conventions or domain terminology.
+- If available, enable **Cursor** for deep codebase exploration.
+
+### Cursor improvements are slow or falling back to Gemini
+
+- Cursor agent calls involve cloning a repository and running an exploration agent, which takes longer than standard Gemini calls.
+- If the system reports a fallback, it means the Cursor concurrency limit was reached. Try again later or continue with Gemini-only improvements.
 
 ---
 
@@ -300,6 +359,14 @@ From the improvement view, click **Create New** to open a modal that lets you cr
 | **Annotations** | AI-written explanations attached to each change in the diff view. |
 | **Refinement chat** | Iterative conversation with the AI to adjust improvements. |
 | **Templates** | Predefined structures (Bug, Feature, Spike, Tech Debt) that guide the AI's output format. |
+| **User skills** | Session-only Markdown rules (coding standards, team conventions) inlined into AI prompts. |
+| **Compose workspace** | The "create from scratch" mode for building new tickets from free-text descriptions. |
+| **Task breakdown** | AI decomposition of a ticket into implementable subtasks. |
 | **Ticket Scanner** | Batch mode that uses a JQL query to find and queue multiple tickets for review. |
 | **Automation labels** | Jira labels used to trigger and track automated refinement workflows. |
 | **Detail level** | Controls verbosity of AI output: high, medium, or low. |
+| **Repository context** | Code structure and patterns extracted from a connected GitHub or GitLab repo. |
+| **MCP** | Model Context Protocol — an agentic loop that uses GitHub/GitLab tools to gather deeper repo context. |
+| **Cursor** | Optional integration with the Cursor SDK for agent-driven codebase exploration. |
+| **Reference links** | External URLs or uploaded files included as additional AI context. |
+| **Drafts** | Auto-saved work-in-progress that can be resumed after navigating away. |
