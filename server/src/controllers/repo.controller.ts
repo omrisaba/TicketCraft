@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { ReferenceLink } from 'ticketcraft-shared';
 import multer from 'multer';
+import { getCredentials } from '../types/index.js';
 import { RepoService } from '../services/repo/RepoService.js';
 import { AppError } from '../middleware/errorHandler.js';
 
@@ -44,7 +45,11 @@ export class RepoController {
         throw new AppError(400, 'INVALID_REPO_URL', 'A repository URL is required.');
       }
 
-      const context = await RepoService.fetchContext(repoUrl.trim());
+      const parsed = RepoService.parseRepoUrl(repoUrl.trim());
+      const creds = getCredentials(req);
+      const authToken =
+        parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
+      const context = await RepoService.fetchContext(repoUrl.trim(), authToken);
       const promptContext = RepoService.formatContextForPrompt(context);
 
       res.json({ success: true, data: { ...context, promptContext } });
@@ -156,13 +161,28 @@ export class RepoController {
       return `https://raw.githubusercontent.com/${ghBlobMatch[1]}/${ghBlobMatch[2]}/${ghBlobMatch[3]}/${ghBlobMatch[4]}`;
     }
 
-    const glBlobMatch = url.match(
-      /gitlab\.com\/([^/]+\/[^/]+)\/-\/blob\/([^/]+)\/(.+)/,
-    );
-    if (glBlobMatch) {
-      const projectId = encodeURIComponent(glBlobMatch[1]);
-      const filePath = encodeURIComponent(glBlobMatch[3]);
-      return `https://gitlab.com/api/v4/projects/${projectId}/repository/files/${filePath}/raw?ref=${glBlobMatch[2]}`;
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      parsed = null;
+    }
+    if (
+      parsed
+      && parsed.hostname.toLowerCase() === 'gitlab.com'
+      && parsed.pathname.includes('/-/blob/')
+    ) {
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      const dashIdx = parts.indexOf('-');
+      const blobIdx = parts.indexOf('blob');
+      if (dashIdx >= 0 && blobIdx === dashIdx + 1 && blobIdx + 2 < parts.length) {
+        const namespace = parts.slice(0, dashIdx).join('/');
+        const ref = parts[blobIdx + 1];
+        const filePathRaw = parts.slice(blobIdx + 2).join('/');
+        const projectId = encodeURIComponent(namespace);
+        const filePath = encodeURIComponent(filePathRaw);
+        return `https://gitlab.com/api/v4/projects/${projectId}/repository/files/${filePath}/raw?ref=${ref}`;
+      }
     }
 
     return url;

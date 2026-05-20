@@ -24,8 +24,12 @@ export class AutomationStore {
     await fs.mkdir(this.userDir(emailHash), { recursive: true });
   }
 
+  private static safeBasename(raw: string): string {
+    return raw.replace(/[^A-Za-z0-9_-]/g, '_');
+  }
+
   private static filePath(emailHash: string, ticketKey: string): string {
-    return path.join(this.userDir(emailHash), `${ticketKey}.json`);
+    return path.join(this.userDir(emailHash), `${this.safeBasename(ticketKey)}.json`);
   }
 
   private static profilePath(emailHash: string): string {

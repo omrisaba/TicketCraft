@@ -108,9 +108,9 @@ export class AIController {
         repoOwner: parsed.owner,
         repoName: parsed.repo,
         authToken,
+        provider: parsed.provider as 'github' | 'gitlab',
       });
       const { context, stats } = await agent.gatherContext(ticket);
-      stats.provider = parsed.provider as 'github' | 'gitlab';
       if (context) {
         return { prompt: (basePrompt || '') + context, mcpStats: stats };
       }
@@ -155,7 +155,8 @@ export class AIController {
           const result = await this.improveWithCursor(req, ticket, repoUrl, improveBase);
           keepAlive.stop();
           res.end(JSON.stringify({ success: true, data: result }));
-          try { usageTracker.record(getCredentials(req).jiraEmail, 'improve'); } catch { /* non-critical */ }
+          usageTracker.record(getCredentials(req).jiraEmail, 'improve')
+            .catch((e) => console.warn('[USAGE] improve record failed:', (e as Error).message));
         } catch (err: any) {
           keepAlive.stop();
           const msg = err?.message || 'Cursor improve failed';
@@ -173,7 +174,8 @@ export class AIController {
       });
 
       res.json({ success: true, data: { ...result, mcpStats } });
-      try { usageTracker.record(getCredentials(req).jiraEmail, 'improve'); } catch { /* non-critical */ }
+      usageTracker.record(getCredentials(req).jiraEmail, 'improve')
+        .catch((e) => console.warn('[USAGE] improve record failed:', (e as Error).message));
     } catch (err) {
       next(err);
     }
@@ -212,15 +214,15 @@ export class AIController {
       return { ...result, cursorFallback: true, codeInsights: null };
     }
 
-    const parsed = RepoService.parseRepoUrl(repoUrl);
-    const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
-
-    const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
-    const cursor = new CursorAdapter(creds.cursorApiKey!, admin.cursorModel, repoDir);
-    const gemini = this.getAI(req);
-
     cursorActiveCount++;
     try {
+      const parsed = RepoService.parseRepoUrl(repoUrl);
+      const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
+
+      const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
+      const cursor = new CursorAdapter(creds.cursorApiKey!, admin.cursorModel, repoDir);
+      const gemini = this.getAI(req);
+
       const analysis = await cursor.exploreForImprove(ticket, options);
       const result = await gemini.formatImproveResult(ticket, analysis, options);
       return { ...result, cursorFallback: false };
@@ -252,7 +254,8 @@ export class AIController {
           const result = await this.composeWithCursor(req, freeText, repoUrl, composeOpts);
           keepAlive.stop();
           res.end(JSON.stringify({ success: true, data: result }));
-          try { usageTracker.record(getCredentials(req).jiraEmail, 'compose'); } catch { /* non-critical */ }
+          usageTracker.record(getCredentials(req).jiraEmail, 'compose')
+            .catch((e) => console.warn('[USAGE] compose record failed:', (e as Error).message));
         } catch (err: any) {
           keepAlive.stop();
           const msg = err?.message || 'Cursor compose failed';
@@ -277,7 +280,8 @@ export class AIController {
       });
 
       res.json({ success: true, data: { ...result, mcpStats } });
-      try { usageTracker.record(getCredentials(req).jiraEmail, 'compose'); } catch { /* non-critical */ }
+      usageTracker.record(getCredentials(req).jiraEmail, 'compose')
+        .catch((e) => console.warn('[USAGE] compose record failed:', (e as Error).message));
     } catch (err) {
       next(err);
     }
@@ -311,14 +315,15 @@ export class AIController {
       const result = await ai.composeTicket(freeText, options);
       return { ...result, cursorFallback: true, codeInsights: null };
     }
-    const parsed = RepoService.parseRepoUrl(repoUrl);
-    const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
-    const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
-    const cursor = new CursorAdapter(creds.cursorApiKey!, admin.cursorModel, repoDir);
-    const gemini = this.getAI(req);
 
     cursorActiveCount++;
     try {
+      const parsed = RepoService.parseRepoUrl(repoUrl);
+      const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
+      const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
+      const cursor = new CursorAdapter(creds.cursorApiKey!, admin.cursorModel, repoDir);
+      const gemini = this.getAI(req);
+
       const analysis = await cursor.exploreForCompose(freeText, options);
       const result = await gemini.formatComposeResult(freeText, analysis, options);
       return { ...result, cursorFallback: false };
@@ -409,14 +414,15 @@ export class AIController {
       const ai = this.getAI(req);
       return ai.breakdownTicket(ticket, options);
     }
-    const parsed = RepoService.parseRepoUrl(repoUrl);
-    const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
-    const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
-    const cursor = new CursorAdapter(creds.cursorApiKey!, admin.cursorModel, repoDir);
-    const gemini = this.getAI(req);
 
     cursorActiveCount++;
     try {
+      const parsed = RepoService.parseRepoUrl(repoUrl);
+      const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
+      const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
+      const cursor = new CursorAdapter(creds.cursorApiKey!, admin.cursorModel, repoDir);
+      const gemini = this.getAI(req);
+
       const analysis = await cursor.exploreForBreakdown(ticket, options);
       return await gemini.formatBreakdownResult(ticket, analysis, options);
     } finally {

@@ -71,6 +71,24 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       signal: controller.signal,
     });
 
+    const contentType = response.headers.get('content-type') || '';
+    const isJson = contentType.includes('application/json');
+
+    if (!isJson) {
+      if (!response.ok) {
+        const raw = await response.text().catch(() => '');
+        throw new ApiClientError(
+          raw || `Request failed with HTTP ${response.status}`,
+          'HTTP_ERROR',
+          response.status,
+        );
+      }
+      if (contentType.includes('application/pdf')) {
+        return await response.arrayBuffer() as T;
+      }
+      return await response.text() as T;
+    }
+
     const data: ApiResponse<T> = await response.json();
 
     if (!data.success || data.error) {
@@ -188,20 +206,36 @@ export const api = {
         if (currentCredentials.gitlabToken) headers['X-Gitlab-Token'] = currentCredentials.gitlabToken;
         if (currentCredentials.cursorApiKey) headers['X-Cursor-Api-Key'] = currentCredentials.cursorApiKey;
       }
-      const response = await fetch('/api/repo/upload-files', {
-        method: 'POST',
-        headers,
-        body: formData,
-      });
-      const data = await response.json();
-      if (!data.success || data.error) {
-        throw new ApiClientError(
-          data.error?.message || 'Upload failed',
-          data.error?.code || 'UNKNOWN',
-          response.status,
-        );
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+      try {
+        const response = await fetch('/api/repo/upload-files', {
+          method: 'POST',
+          headers,
+          body: formData,
+          signal: controller.signal,
+        });
+        const data = await response.json();
+        if (!data.success || data.error) {
+          throw new ApiClientError(
+            data.error?.message || 'Upload failed',
+            data.error?.code || 'UNKNOWN',
+            response.status,
+          );
+        }
+        return data.data;
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          throw new ApiClientError(
+            'File upload timed out. Please try again with smaller files.',
+            'TIMEOUT',
+            408,
+          );
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeoutId);
       }
-      return data.data;
     },
   },
 

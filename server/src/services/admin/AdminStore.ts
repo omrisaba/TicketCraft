@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SETTINGS_PATH = path.resolve(__dirname, '../../../data/admin-settings.json');
 
 const DEFAULTS: AdminSettings = {
-  defaultModel: 'gemini-3.1-pro-preview',
+  defaultModel: 'gemini-3.5-flash',
   defaultTemperature: 0.3,
   scanJql: 'project = "MYPROJECT" AND status = "To Do" ORDER BY created DESC',
   githubMcpUrl: '',
@@ -19,19 +19,30 @@ const DEFAULTS: AdminSettings = {
   cursorMaxConcurrent: 8,
 };
 
+const CACHE_TTL_MS = 60_000;
+let cachedSettings: AdminSettings | null = null;
+let cacheTime = 0;
+
 export class AdminStore {
   static async load(): Promise<AdminSettings> {
+    if (cachedSettings && Date.now() - cacheTime < CACHE_TTL_MS) {
+      return cachedSettings;
+    }
     try {
       const raw = await fs.readFile(SETTINGS_PATH, 'utf-8');
       const saved = JSON.parse(raw) as Partial<AdminSettings>;
-      return { ...DEFAULTS, ...saved };
+      cachedSettings = { ...DEFAULTS, ...saved };
     } catch {
-      return { ...DEFAULTS };
+      cachedSettings = { ...DEFAULTS };
     }
+    cacheTime = Date.now();
+    return cachedSettings;
   }
 
   static async save(settings: AdminSettings): Promise<void> {
     await fs.mkdir(path.dirname(SETTINGS_PATH), { recursive: true });
     await fs.writeFile(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
+    cachedSettings = settings;
+    cacheTime = Date.now();
   }
 }

@@ -19,6 +19,7 @@ import { AppError } from '../../middleware/errorHandler.js';
 import { logBuffer } from '../logging/LogBuffer.js';
 import { skillsMarkdownPromptSection } from './skillsPromptSection.js';
 import { detailLevelPromptSection } from './detailLevelPrompt.js';
+import { DIMENSION_WEIGHTS, type DimensionId } from 'ticketcraft-shared';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -73,13 +74,26 @@ export class GeminiAdapter implements AIProvider {
       }
 
       const data = await response.json() as any;
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      const candidate = data.candidates?.[0];
+      const finishReason: string | undefined = candidate?.finishReason;
+      const text = candidate?.content?.parts?.[0]?.text;
       const durationMs = Date.now() - startTime;
       const tokenMeta = data.usageMetadata;
 
       if (!text) {
-        logBuffer.add({ category: 'llm', operation, model: this.model, temperature: this.temperature, promptLength: prompt.length, durationMs, success: false, error: 'Empty response' });
-        throw new AppError(500, 'GEMINI_EMPTY_RESPONSE', 'Gemini returned an empty response.');
+        const reason = finishReason === 'SAFETY'
+          ? 'Gemini blocked the response due to safety filters. Try rephrasing ticket content.'
+          : finishReason === 'MAX_TOKENS'
+            ? 'Gemini response was truncated (output too long). Try reducing the scope.'
+            : 'Gemini returned an empty response.';
+        const code = finishReason === 'SAFETY' ? 'GEMINI_SAFETY_BLOCK' : 'GEMINI_EMPTY_RESPONSE';
+        logBuffer.add({ category: 'llm', operation, model: this.model, temperature: this.temperature, promptLength: prompt.length, durationMs, success: false, error: reason });
+        throw new AppError(500, code, reason);
+      }
+
+      if (finishReason === 'MAX_TOKENS' && jsonMode) {
+        logBuffer.add({ category: 'llm', operation, model: this.model, temperature: this.temperature, promptLength: prompt.length, responseLength: text.length, durationMs, success: false, error: 'Response truncated (MAX_TOKENS)' });
+        throw new AppError(500, 'GEMINI_TRUNCATED', 'Gemini response was truncated because the output was too long. Try breaking the request into smaller parts or reducing scope.');
       }
 
       const mergedMeta: Record<string, unknown> = { ...(extraLogMeta || {}) };
@@ -105,7 +119,15 @@ export class GeminiAdapter implements AIProvider {
 
   private parseJson<T>(text: string): T {
     try {
-      const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      let cleaned = text.trim();
+      if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '');
+        const lastFence = cleaned.lastIndexOf('```');
+        if (lastFence >= 0) {
+          cleaned = cleaned.slice(0, lastFence);
+        }
+        cleaned = cleaned.trim();
+      }
       return JSON.parse(cleaned);
     } catch {
       throw new AppError(500, 'GEMINI_PARSE_ERROR', 'Failed to parse Gemini response as JSON.');
@@ -139,10 +161,15 @@ export class GeminiAdapter implements AIProvider {
     }
 
     if (linkedTickets && linkedTickets.length > 0) {
-      parts.push(`\nLinked Tickets:`);
+      parts.push(`\nLinked Tickets (detailed):`);
       linkedTickets.forEach((lt) => {
         parts.push(`  - ${lt.key}: ${lt.summary} (${lt.status})`);
         if (lt.description) parts.push(`    Description: ${lt.description}`);
+      });
+    } else if (ticket.linkedTickets && ticket.linkedTickets.length > 0) {
+      parts.push(`\nLinked Tickets:`);
+      ticket.linkedTickets.forEach((lt) => {
+        parts.push(`  - ${lt.key}: ${lt.summary} (${lt.status}) [${lt.linkType}, ${lt.direction}]`);
       });
     }
 
@@ -184,7 +211,21 @@ Return JSON:
 }`;
 
     const text = await this.generateContent(prompt, true, 'scoreTicket');
-    return this.parseJson<TicketScore>(text);
+    const parsed = this.parseJson<TicketScore>(text);
+    return GeminiAdapter.recalculateOverall(parsed);
+  }
+
+  private static recalculateOverall(score: TicketScore): TicketScore {
+    if (!score.dimensions || score.dimensions.length === 0) return score;
+    let weightedSum = 0;
+    let totalWeight = 0;
+    for (const dim of score.dimensions) {
+      const w = DIMENSION_WEIGHTS[dim.id as DimensionId] ?? dim.weight ?? 0;
+      weightedSum += (dim.score / dim.maxScore) * w * 100;
+      totalWeight += w;
+    }
+    const computed = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : score.overall;
+    return { ...score, overall: computed };
   }
 
   async improveTicket(

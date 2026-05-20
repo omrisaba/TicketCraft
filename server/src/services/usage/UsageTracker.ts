@@ -1,4 +1,5 @@
 import fs from 'fs';
+import fsp from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { UsageEvent, UsageEventType, UsageStats, UsageUserSummary } from 'ticketcraft-shared';
@@ -7,6 +8,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USAGE_DIR = path.resolve(__dirname, '../../../data/usage');
 const FILE_PREFIX = 'usage-';
 const RETENTION_MONTHS = 12;
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 200;
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
 function ensureDir(): void {
   fs.mkdirSync(USAGE_DIR, { recursive: true });
@@ -70,7 +74,6 @@ function parseFile(filePath: string): UsageEvent[] {
 
 function readAll(): UsageEvent[] {
   ensureDir();
-  pruneOldFiles();
   const merged: UsageEvent[] = [];
   for (const key of retentionMonthKeys()) {
     merged.push(...parseFile(filePathForMonth(key)));
@@ -78,8 +81,43 @@ function readAll(): UsageEvent[] {
   return merged;
 }
 
+/**
+ * Reads the tail of a file and checks whether it contains the given marker.
+ * Used to verify that a write actually landed on disk.
+ */
+async function verifyTail(fp: string, marker: string, tailBytes: number): Promise<boolean> {
+  let fd: fsp.FileHandle | null = null;
+  try {
+    fd = await fsp.open(fp, 'r');
+    const { size } = await fd.stat();
+    const readSize = Math.min(tailBytes, size);
+    const buf = Buffer.alloc(readSize);
+    await fd.read(buf, 0, readSize, Math.max(0, size - readSize));
+    return buf.toString('utf-8').includes(marker);
+  } catch {
+    return false;
+  } finally {
+    await fd?.close();
+  }
+}
+
 class UsageTrackerSingleton {
-  record(email: string, event: UsageEventType, ticketKey?: string, meta?: Record<string, unknown>): void {
+  private pruneTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    try { pruneOldFiles(); } catch { /* best-effort on startup */ }
+    this.pruneTimer = setInterval(() => {
+      try { pruneOldFiles(); } catch { /* best-effort */ }
+    }, PRUNE_INTERVAL_MS);
+    this.pruneTimer.unref?.();
+  }
+
+  async record(
+    email: string,
+    event: UsageEventType,
+    ticketKey?: string,
+    meta?: Record<string, unknown>,
+  ): Promise<void> {
     const timestamp = new Date().toISOString();
     const id = `usage_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
     const entry: UsageEvent = {
@@ -90,11 +128,36 @@ class UsageTrackerSingleton {
       ...(ticketKey && { ticketKey }),
       ...(meta && { meta }),
     };
+
     ensureDir();
-    pruneOldFiles();
     const key = monthKey(new Date(timestamp));
     const fp = filePathForMonth(key);
-    fs.appendFileSync(fp, `${JSON.stringify(entry)}\n`, 'utf-8');
+    const line = JSON.stringify(entry);
+
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        await fsp.appendFile(fp, line + '\n', 'utf-8');
+
+        const verified = await verifyTail(fp, id, line.length + 512);
+        if (verified) return;
+
+        console.warn(`[USAGE] Write verification failed (attempt ${attempt}/${MAX_RETRIES})`);
+      } catch (err) {
+        lastErr = err;
+        console.warn(
+          `[USAGE] Write attempt ${attempt}/${MAX_RETRIES} failed:`,
+          (err as Error).message,
+        );
+      }
+      if (attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, RETRY_BASE_MS * attempt));
+      }
+    }
+    console.warn(
+      `[USAGE] Gave up recording ${event} for ${email} after ${MAX_RETRIES} attempts`,
+      lastErr ? (lastErr as Error).message : '',
+    );
   }
 
   query(): UsageStats {

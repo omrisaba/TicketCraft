@@ -66,6 +66,15 @@ export function credentialExtractor(
 
 const verifiedCache = new Map<string, number>();
 const VERIFY_TTL = 5 * 60 * 1000;
+const PRUNE_INTERVAL = 10 * 60 * 1000;
+
+const _pruneTimer = setInterval(() => {
+  const cutoff = Date.now() - VERIFY_TTL;
+  for (const [key, ts] of verifiedCache) {
+    if (ts < cutoff) verifiedCache.delete(key);
+  }
+}, PRUNE_INTERVAL);
+_pruneTimer.unref?.();
 
 export function verifiedCredentialExtractor(
   req: Request,

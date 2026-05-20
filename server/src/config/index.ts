@@ -28,7 +28,7 @@ export const config = {
 
   gemini: {
     apiKey: process.env.GEMINI_API_KEY || '',
-    defaultModel: process.env.GEMINI_DEFAULT_MODEL || 'gemini-3.1-pro-preview',
+    defaultModel: process.env.GEMINI_DEFAULT_MODEL || 'gemini-3.5-flash',
   },
 
   jira: {

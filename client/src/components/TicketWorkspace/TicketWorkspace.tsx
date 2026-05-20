@@ -321,25 +321,27 @@ export function TicketWorkspace() {
       setTicketKey(ticketData.key);
       setDetailLevel(suggestedDetailLevel(ticketData.issueType));
 
+      let fetchedLinked: Ticket[] = [];
       try {
-        setStatusMessage('Loading linked tickets...');
-        const linked = await api.jira.getLinkedTickets(ticketData.key) as any[];
-        if (linked?.length > 0) {
-          const fullLinked: Ticket[] = [];
-          for (const lt of linked.slice(0, 5)) {
-            try {
-              const full = await api.jira.getTicket(lt.key) as Ticket;
-              fullLinked.push(full);
-            } catch { /* skip inaccessible linked tickets */ }
-          }
-          setLinkedTickets(fullLinked);
+        const linkedRefs = ticketData.linkedTickets || [];
+        if (linkedRefs.length > 0) {
+          setStatusMessage('Loading linked tickets...');
+          const results = await Promise.allSettled(
+            linkedRefs.slice(0, 5).map((lt) =>
+              api.jira.getTicket(lt.key) as Promise<Ticket>,
+            ),
+          );
+          fetchedLinked = results
+            .filter((r): r is PromiseFulfilledResult<Ticket> => r.status === 'fulfilled')
+            .map((r) => r.value);
+          setLinkedTickets(fetchedLinked);
         }
       } catch { /* linked tickets are optional */ }
 
       setScoreLoading(true);
       setStatusMessage('AI is analyzing ticket quality...');
       const referenceContent = formatReferenceContent(savedLinks);
-      const scoreResult = await api.ai.score({ ticket: ticketData, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl }) as TicketScore;
+      const scoreResult = await api.ai.score({ ticket: ticketData, linkedTickets: fetchedLinked.length > 0 ? fetchedLinked : undefined, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl }) as TicketScore;
       setScore(scoreResult);
       setOriginalScore(scoreResult.overall);
       setStep('scored');
@@ -483,7 +485,7 @@ export function TicketWorkspace() {
 
       setPreviousScore(score);
       const referenceContent = formatReferenceContent();
-      const newScore = await api.ai.score({ ticket: updatedTicket, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl }) as TicketScore;
+      const newScore = await api.ai.score({ ticket: updatedTicket, linkedTickets: linkedTickets.length > 0 ? linkedTickets : undefined, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl }) as TicketScore;
       setScore(newScore);
 
       updateHistoryEntry(ticket.key, { scoreAfter: newScore.overall });
@@ -515,7 +517,7 @@ export function TicketWorkspace() {
         };
         const referenceContent = formatReferenceContent();
         finalScore = await api.ai.score({
-          ticket: updatedTicket, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl,
+          ticket: updatedTicket, linkedTickets: linkedTickets.length > 0 ? linkedTickets : undefined, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl,
         }) as TicketScore;
         setPreviousScore(score);
         setScore(finalScore);

@@ -71,7 +71,7 @@ export class JiraClient implements IssueTracker {
       reporter: fields.reporter?.displayName || null,
       reporterEmail: fields.reporter?.emailAddress || null,
       labels: fields.labels || [],
-      storyPoints: fields.customfield_10016 || null,
+      storyPoints: fields.customfield_10016 ?? null,
       issueType: fields.issuetype?.name || 'Task',
       acceptanceCriteria: null,
       parent: fields.parent ? {
@@ -115,12 +115,16 @@ export class JiraClient implements IssueTracker {
       updateFields.summary = changes.summary;
     }
 
-    let fullDescription = changes.description ?? '';
-    if (changes.acceptanceCriteria) {
-      fullDescription += `\n\n## Acceptance Criteria\n\n${changes.acceptanceCriteria}`;
-    }
-    if (fullDescription) {
-      updateFields.description = this.textToAdf(fullDescription);
+    const hasDescription = changes.description !== undefined;
+    const hasAc = changes.acceptanceCriteria !== undefined && changes.acceptanceCriteria !== null;
+    if (hasDescription || hasAc) {
+      let fullDescription = changes.description ?? '';
+      if (changes.acceptanceCriteria) {
+        fullDescription += `\n\n## Acceptance Criteria\n\n${changes.acceptanceCriteria}`;
+      }
+      if (fullDescription) {
+        updateFields.description = this.textToAdf(fullDescription);
+      }
     }
 
     if (changes.labels !== undefined) {
@@ -300,12 +304,8 @@ export class JiraClient implements IssueTracker {
       assigneeAccountId: opts.parentTicket.assigneeAccountId,
     });
 
-    const subtaskResults: { key: string; id: string; summary: string }[] = [];
-    const errors: { index: number; summary: string; error: string }[] = [];
-
-    for (let i = 0; i < opts.subtasks.length; i++) {
-      const st = opts.subtasks[i];
-      try {
+    const results = await Promise.allSettled(
+      opts.subtasks.map(async (st, i) => {
         const isSubtaskType = /^sub.?task$/i.test(st.issueType);
         const created = await this.createTicket({
           projectKey: opts.parentTicket.projectKey,
@@ -316,9 +316,18 @@ export class JiraClient implements IssueTracker {
         if (!isSubtaskType) {
           try { await this.linkTickets(created.key, parent.key, 'Relates'); } catch { /* best-effort */ }
         }
-        subtaskResults.push({ key: created.key, id: created.id, summary: st.changes.summary || '' });
-      } catch (err: any) {
-        errors.push({ index: i, summary: st.changes.summary || '', error: err.message || 'Unknown error' });
+        return { index: i, key: created.key, id: created.id, summary: st.changes.summary || '' };
+      }),
+    );
+
+    const subtaskResults: { key: string; id: string; summary: string }[] = [];
+    const errors: { index: number; summary: string; error: string }[] = [];
+    for (const r of results) {
+      if (r.status === 'fulfilled') {
+        subtaskResults.push({ key: r.value.key, id: r.value.id, summary: r.value.summary });
+      } else {
+        const idx = results.indexOf(r);
+        errors.push({ index: idx, summary: opts.subtasks[idx]?.changes.summary || '', error: (r.reason as Error)?.message || 'Unknown error' });
       }
     }
 
@@ -351,18 +360,17 @@ export class JiraClient implements IssueTracker {
     };
   }
 
-  private htmlToMarkdown(html: string | null | undefined): string | null {
-    if (!html || typeof html !== 'string') return null;
-    const cleaned = html.trim();
-    if (!cleaned) return null;
+  private static sharedTurndown: TurndownService | null = null;
 
-    const turndown = new TurndownService({
+  private static getTurndown(): TurndownService {
+    if (JiraClient.sharedTurndown) return JiraClient.sharedTurndown;
+    const td = new TurndownService({
       headingStyle: 'atx',
       codeBlockStyle: 'fenced',
       bulletListMarker: '-',
     });
 
-    turndown.addRule('jiraPanels', {
+    td.addRule('jiraPanels', {
       filter: (node) => {
         const className = node.getAttribute?.('class') || '';
         return className.includes('panel') || node.tagName === 'AC:STRUCTURED-MACRO';
@@ -373,7 +381,7 @@ export class JiraClient implements IssueTracker {
       },
     });
 
-    turndown.addRule('jiraCheckboxes', {
+    td.addRule('jiraCheckboxes', {
       filter: (node) => node.tagName === 'LI' && (node.getAttribute?.('class') || '').includes('task'),
       replacement: (content) => {
         const checked = content.includes('[x]') || content.includes('✓');
@@ -381,8 +389,17 @@ export class JiraClient implements IssueTracker {
       },
     });
 
+    JiraClient.sharedTurndown = td;
+    return td;
+  }
+
+  private htmlToMarkdown(html: string | null | undefined): string | null {
+    if (!html || typeof html !== 'string') return null;
+    const cleaned = html.trim();
+    if (!cleaned) return null;
+
     try {
-      const md = turndown.turndown(cleaned);
+      const md = JiraClient.getTurndown().turndown(cleaned);
       return md.trim() || null;
     } catch {
       return cleaned.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || null;

@@ -52,7 +52,8 @@ export class SessionController {
       const valid = validationErrors.length === 0;
 
       if (valid) {
-        try { usageTracker.record(jiraEmail.trim().toLowerCase(), 'login'); } catch { /* non-critical */ }
+        usageTracker.record(jiraEmail.trim().toLowerCase(), 'login')
+          .catch((err) => console.warn('[USAGE] login record failed:', (err as Error).message));
       }
 
       res.json({

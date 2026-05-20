@@ -17,8 +17,12 @@ export class HistoryStore {
     return path.join(HISTORY_DIR, this.hashEmail(email));
   }
 
+  private static safeBasename(raw: string): string {
+    return raw.replace(/[^A-Za-z0-9_-]/g, '_');
+  }
+
   private static filePath(email: string, id: string): string {
-    return path.join(this.userDir(email), `${id}.json`);
+    return path.join(this.userDir(email), `${this.safeBasename(id)}.json`);
   }
 
   private static async ensureDir(email: string): Promise<void> {
@@ -37,14 +41,13 @@ export class HistoryStore {
 
     try {
       const files = await fs.readdir(dir);
-      const items: HistoryListItem[] = [];
+      const jsonFiles = files.filter((f) => f.endsWith('.json'));
 
-      for (const file of files) {
-        if (!file.endsWith('.json')) continue;
-        try {
+      const results = await Promise.allSettled(
+        jsonFiles.map(async (file) => {
           const raw = await fs.readFile(path.join(dir, file), 'utf-8');
           const snap = JSON.parse(raw) as HistorySnapshot;
-          items.push({
+          return {
             id: snap.id,
             ticketKey: snap.ticketKey,
             ticketSummary: snap.ticketSummary,
@@ -53,9 +56,13 @@ export class HistoryStore {
             syncedAt: snap.syncedAt,
             savedAt: snap.savedAt,
             type: snap.type ?? 'improved',
-          });
-        } catch { /* skip corrupt files */ }
-      }
+          } satisfies HistoryListItem;
+        }),
+      );
+
+      const items = results
+        .filter((r): r is PromiseFulfilledResult<HistoryListItem> => r.status === 'fulfilled')
+        .map((r) => r.value);
 
       items.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
       return items;

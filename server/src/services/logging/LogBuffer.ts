@@ -126,7 +126,6 @@ function parseFile(filePath: string): LogEntry[] {
 
 function readRetention(onlyDay?: string): LogEntry[] {
   ensureLogsDir();
-  pruneOldFiles();
   const dayKeys = onlyDay && isValidDayKey(onlyDay)
     ? [onlyDay]
     : listRetentionDayKeys();
@@ -138,40 +137,68 @@ function readRetention(onlyDay?: string): LogEntry[] {
 }
 
 function computeStats(entries: LogEntry[]): LogStats {
-  const llm = entries.filter((e) => e.category === 'llm');
-  const mcp = entries.filter((e) => e.category === 'mcp');
+  let llmCount = 0;
+  let mcpCount = 0;
+  let llmErrors = 0;
+  let mcpErrors = 0;
   const byDayMap = new Map<string, { total: number; llm: number; mcp: number }>();
   for (const e of entries) {
+    const isLlm = e.category === 'llm';
+    if (isLlm) {
+      llmCount++;
+      if (!e.success) llmErrors++;
+    } else {
+      mcpCount++;
+      if (!e.success) mcpErrors++;
+    }
     const dk = e.timestamp.slice(0, 10);
-    const cur = byDayMap.get(dk) || { total: 0, llm: 0, mcp: 0 };
-    cur.total += 1;
-    if (e.category === 'llm') cur.llm += 1;
-    else cur.mcp += 1;
-    byDayMap.set(dk, cur);
+    let cur = byDayMap.get(dk);
+    if (!cur) { cur = { total: 0, llm: 0, mcp: 0 }; byDayMap.set(dk, cur); }
+    cur.total++;
+    if (isLlm) cur.llm++; else cur.mcp++;
   }
   const byDate = [...byDayMap.entries()]
     .sort((a, b) => (a[0] < b[0] ? 1 : -1))
     .map(([date, v]) => ({ date, ...v }));
   return {
     total: entries.length,
-    llm: llm.length,
-    mcp: mcp.length,
-    llmErrors: llm.filter((e) => !e.success).length,
-    mcpErrors: mcp.filter((e) => !e.success).length,
+    llm: llmCount,
+    mcp: mcpCount,
+    llmErrors,
+    mcpErrors,
     byDate,
   };
 }
 
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
 class LogBufferSingleton {
+  private pruneTimer: ReturnType<typeof setInterval> | null = null;
+  private dirReady = false;
+
+  constructor() {
+    try { pruneOldFiles(); } catch { /* best-effort on startup */ }
+    this.pruneTimer = setInterval(() => {
+      try { pruneOldFiles(); } catch { /* best-effort */ }
+    }, PRUNE_INTERVAL_MS);
+    this.pruneTimer.unref?.();
+  }
+
   add(entry: Omit<LogEntry, 'id' | 'timestamp'>): void {
-    const timestamp = new Date().toISOString();
-    const id = `log_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
-    const full: LogEntry = { ...entry, id, timestamp };
-    ensureLogsDir();
-    pruneOldFiles();
-    const dayKey = utcDateKey(new Date(timestamp));
-    const fp = filePathForDay(dayKey);
-    fs.appendFileSync(fp, `${JSON.stringify(full)}\n`, 'utf-8');
+    try {
+      const timestamp = new Date().toISOString();
+      const id = `log_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+      const full: LogEntry = { ...entry, id, timestamp };
+      if (!this.dirReady) {
+        ensureLogsDir();
+        this.dirReady = true;
+      }
+      const dayKey = utcDateKey(new Date(timestamp));
+      const fp = filePathForDay(dayKey);
+      fs.appendFileSync(fp, `${JSON.stringify(full)}\n`, 'utf-8');
+    } catch (err) {
+      console.warn('[LOG_BUFFER] Failed to write log entry:', (err as Error).message);
+    }
   }
 
   /**
@@ -182,18 +209,29 @@ class LogBufferSingleton {
     limit?: number;
     date?: string;
   }): { entries: LogEntry[]; stats: LogStats } {
-    const fullWindow = readRetention();
-    const stats = computeStats(fullWindow);
-    let rows = opts?.date ? readRetention(opts.date) : fullWindow;
-    if (opts?.category) {
-      rows = rows.filter((e) => e.category === opts.category);
+    try {
+      const fullWindow = readRetention();
+      const stats = computeStats(fullWindow);
+      let rows = fullWindow;
+      if (opts?.date) {
+        rows = rows.filter((e) => e.timestamp.startsWith(opts.date!));
+      }
+      if (opts?.category) {
+        rows = rows.filter((e) => e.category === opts.category);
+      }
+      rows.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+      const lim = Math.min(
+        opts?.limit && opts.limit > 0 ? opts.limit : DEFAULT_LIST_LIMIT,
+        50_000,
+      );
+      return { entries: rows.slice(0, lim), stats };
+    } catch (err) {
+      console.warn('[LOG_BUFFER] Failed to query logs:', (err as Error).message);
+      return {
+        entries: [],
+        stats: { total: 0, llm: 0, mcp: 0, llmErrors: 0, mcpErrors: 0, byDate: [] },
+      };
     }
-    rows.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
-    const lim = Math.min(
-      opts?.limit && opts.limit > 0 ? opts.limit : DEFAULT_LIST_LIMIT,
-      50_000,
-    );
-    return { entries: rows.slice(0, lim), stats };
   }
 
   /** @deprecated Prefer query(); kept for tests */

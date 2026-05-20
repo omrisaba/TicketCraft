@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -23,7 +24,7 @@ export class RepoCloneStore {
     token?: string,
   ): Promise<string> {
     const { provider, owner, repo } = RepoService.parseRepoUrl(repoUrl);
-    const key = `${owner}-${repo}`;
+    const key = `${provider}_${createHash('sha256').update(`${owner}/${repo}`).digest('hex').slice(0, 16)}`;
     const repoDir = path.join(REPOS_DIR, key);
 
     const existing = cache.get(key);
@@ -38,6 +39,13 @@ export class RepoCloneStore {
     const exists = await fs.access(path.join(repoDir, '.git')).then(() => true).catch(() => false);
 
     if (exists) {
+      try {
+        await exec('git', ['remote', 'set-url', 'origin', authedUrl], {
+          cwd: repoDir,
+          timeout: 10_000,
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        });
+      } catch { /* best-effort */ }
       try {
         await exec('git', ['pull', '--ff-only', '--depth', '1'], {
           cwd: repoDir,

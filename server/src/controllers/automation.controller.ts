@@ -71,20 +71,17 @@ export class AutomationController {
 
       let repoContextPrompt: string | undefined;
       const profile = await AutomationStore.loadProfile(creds.jiraEmail);
-      if (profile.repoUrl) {
-        try {
-          const repoCtx = await RepoService.fetchContext(profile.repoUrl);
-          repoContextPrompt = RepoService.formatContextForPrompt(repoCtx);
-        } catch { /* repo context is best-effort */ }
-      }
-
       let mcpParsed: { provider: string; owner: string; repo: string } | null = null;
       let mcpUrl: string | null = null;
       if (profile.repoUrl) {
         try {
           mcpParsed = RepoService.parseRepoUrl(profile.repoUrl);
+          const authToken =
+            mcpParsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
+          const repoCtx = await RepoService.fetchContext(profile.repoUrl, authToken);
+          repoContextPrompt = RepoService.formatContextForPrompt(repoCtx);
           mcpUrl = (mcpParsed.provider === 'github' ? adminCfg.githubMcpUrl : adminCfg.gitlabMcpUrl) || null;
-        } catch { /* ignore */ }
+        } catch { /* repo context is best-effort */ }
       }
 
       let processed = 0;
@@ -113,6 +110,7 @@ export class AutomationController {
                 repoOwner: mcpParsed.owner,
                 repoName: mcpParsed.repo,
                 authToken,
+                provider: mcpParsed.provider as 'github' | 'gitlab',
               });
               const mcpResult = await agent.gatherContext(ticket);
               if (mcpResult.context) enrichedPrompt = (enrichedPrompt || '') + mcpResult.context;

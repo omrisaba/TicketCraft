@@ -26,6 +26,7 @@ interface McpAgentConfig {
   repoOwner: string;
   repoName: string;
   authToken?: string;
+  provider?: 'github' | 'gitlab';
 }
 
 interface ToolCallDecision {
@@ -49,11 +50,12 @@ export class McpAgent {
     const initStart = Date.now();
     await this.client.initialize();
     const tools = await this.client.listTools();
-    logBuffer.add({ category: 'mcp', operation: 'initialize', provider: 'github', durationMs: Date.now() - initStart, success: true, meta: { toolCount: tools.length } });
+    const provider = this.config.provider ?? 'github';
+    logBuffer.add({ category: 'mcp', operation: 'initialize', provider, durationMs: Date.now() - initStart, success: true, meta: { toolCount: tools.length } });
 
     const emptyStats = (elapsed: number): McpUsageStats => ({
       used: false,
-      provider: 'github',
+      provider,
       toolsAvailable: tools.length,
       roundsUsed: 0,
       toolCallsMade: 0,
@@ -96,14 +98,14 @@ export class McpAgent {
         contextParts.push(`### Tool: ${toolName}\nArgs: ${JSON.stringify(toolArgs)}\n\n${truncated}`);
         callLog.push({ tool: toolName, args: toolArgs, success: true, reasoning: decision.reasoning });
 
-        logBuffer.add({ category: 'mcp', operation: 'tools/call', tool: toolName, provider: 'github', durationMs: callDuration, success: true, meta: { args: toolArgs, responseLength: text.length, reasoning: decision.reasoning } });
+        logBuffer.add({ category: 'mcp', operation: 'tools/call', tool: toolName, provider, durationMs: callDuration, success: true, meta: { args: toolArgs, responseLength: text.length, reasoning: decision.reasoning } });
       } catch (err) {
         const callDuration = Date.now() - callStart;
         contextParts.push(`### Tool: ${toolName} — ERROR: ${(err as Error).message}`);
         callLog.push({ tool: toolName, args: toolArgs, success: false, reasoning: decision.reasoning });
         totalCalls++;
 
-        logBuffer.add({ category: 'mcp', operation: 'tools/call', tool: toolName, provider: 'github', durationMs: callDuration, success: false, error: (err as Error).message, meta: { args: toolArgs, reasoning: decision.reasoning } });
+        logBuffer.add({ category: 'mcp', operation: 'tools/call', tool: toolName, provider, durationMs: callDuration, success: false, error: (err as Error).message, meta: { args: toolArgs, reasoning: decision.reasoning } });
       }
     }
 
@@ -116,7 +118,7 @@ export class McpAgent {
     const context = `\n\n---\n## Additional Repository Context (fetched via MCP)\n\n${contextParts.join('\n\n')}`;
     const stats: McpUsageStats = {
       used: true,
-      provider: 'github',
+      provider,
       toolsAvailable: tools.length,
       roundsUsed,
       toolCallsMade: totalCalls,

@@ -52,6 +52,10 @@ function DiffField({
   );
 }
 
+function normalizeLabels(labels: string[]): string {
+  return [...labels].sort((a, b) => a.localeCompare(b)).join(', ');
+}
+
 export function DiffView({ original, improved, annotations }: DiffViewProps) {
   const annotationMap = new Map(annotations.map((a) => [a.field.toLowerCase(), a]));
 
@@ -59,7 +63,7 @@ export function DiffView({ original, improved, annotations }: DiffViewProps) {
     { field: 'summary', original: original.summary, improved: improved.summary },
     { field: 'description', original: original.description || '', improved: improved.description },
     { field: 'acceptance criteria', original: original.acceptanceCriteria || '', improved: improved.acceptanceCriteria },
-    { field: 'labels', original: original.labels.join(', '), improved: improved.labels?.join(', ') },
+    { field: 'labels', original: normalizeLabels(original.labels), improved: improved.labels ? normalizeLabels(improved.labels) : undefined },
     { field: 'story points', original: String(original.storyPoints ?? ''), improved: improved.storyPoints != null ? String(improved.storyPoints) : undefined },
   ];
 

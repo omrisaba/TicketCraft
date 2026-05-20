@@ -9,16 +9,16 @@ export interface SessionCredentials {
 
 export type GeminiModel =
   | 'gemini-3.1-pro-preview'
-  | 'gemini-3.1-flash-lite-preview'
-  | 'gemini-3-flash-preview';
+  | 'gemini-3.1-flash-lite'
+  | 'gemini-3.5-flash';
 
 export const AVAILABLE_MODELS: { id: GeminiModel; label: string }[] = [
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
-  { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash-Lite' },
-  { id: 'gemini-3-flash-preview', label: 'Gemini 3.0 Flash' },
+  { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite' },
 ];
 
-export const DEFAULT_MODEL: GeminiModel = 'gemini-3.1-pro-preview';
+export const DEFAULT_MODEL: GeminiModel = 'gemini-3.5-flash';
 
 export interface SessionValidationResult {
   valid: boolean;

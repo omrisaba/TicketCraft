@@ -15,35 +15,98 @@ export interface RepoContextData {
 
 export class RepoService {
   static parseRepoUrl(url: string): ParsedRepoUrl {
-    const cleaned = url.replace(/\.git$/, '').replace(/\/$/, '');
-
-    const ghMatch = cleaned.match(/github\.com\/([^/]+)\/([^/]+)/);
-    if (ghMatch) {
-      return { provider: 'github', owner: ghMatch[1], repo: ghMatch[2] };
+    const raw = url.trim();
+    if (!raw) {
+      throw new AppError(
+        400,
+        'INVALID_REPO_URL',
+        'URL must be a GitHub or GitLab repository (e.g. https://github.com/owner/repo).',
+      );
     }
 
-    const glMatch = cleaned.match(/gitlab\.com\/([^/]+)\/([^/]+)/);
-    if (glMatch) {
-      return { provider: 'gitlab', owner: glMatch[1], repo: glMatch[2] };
+    // Support SSH clone URLs like git@github.com:owner/repo.git
+    const sshMatch = raw.match(/^git@(github\.com|gitlab\.com):(.+?)(?:\.git)?$/i);
+    if (sshMatch) {
+      const provider = sshMatch[1].toLowerCase().includes('github') ? 'github' : 'gitlab';
+      const pathSegments = sshMatch[2].split('/').filter(Boolean);
+      if (provider === 'github') {
+        if (pathSegments.length < 2) {
+          throw new AppError(400, 'INVALID_REPO_URL', 'GitHub URL must include owner and repo.');
+        }
+        return { provider, owner: pathSegments[0], repo: pathSegments[1] };
+      }
+      if (pathSegments.length < 2) {
+        throw new AppError(400, 'INVALID_REPO_URL', 'GitLab URL must include namespace and repo.');
+      }
+      return {
+        provider,
+        owner: pathSegments.slice(0, -1).join('/'),
+        repo: pathSegments[pathSegments.length - 1],
+      };
     }
 
-    throw new AppError(400, 'INVALID_REPO_URL', 'URL must be a GitHub or GitLab repository (e.g. https://github.com/owner/repo).');
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      throw new AppError(
+        400,
+        'INVALID_REPO_URL',
+        'URL must be a GitHub or GitLab repository (e.g. https://github.com/owner/repo).',
+      );
+    }
+
+    const host = parsed.hostname.toLowerCase();
+    const cleanedPath = parsed.pathname.replace(/\.git$/i, '').replace(/\/+$/, '');
+    const segments = cleanedPath.split('/').filter(Boolean);
+
+    if (host === 'github.com') {
+      if (segments.length < 2) {
+        throw new AppError(400, 'INVALID_REPO_URL', 'GitHub URL must include owner and repo.');
+      }
+      return { provider: 'github', owner: segments[0], repo: segments[1] };
+    }
+
+    if (host === 'gitlab.com') {
+      let namespaceParts = segments;
+      const dashMarker = namespaceParts.indexOf('-');
+      if (dashMarker >= 0) {
+        namespaceParts = namespaceParts.slice(0, dashMarker);
+      }
+      if (namespaceParts.length < 2) {
+        throw new AppError(400, 'INVALID_REPO_URL', 'GitLab URL must include namespace and repo.');
+      }
+      return {
+        provider: 'gitlab',
+        owner: namespaceParts.slice(0, -1).join('/'),
+        repo: namespaceParts[namespaceParts.length - 1],
+      };
+    }
+
+    throw new AppError(
+      400,
+      'INVALID_REPO_URL',
+      'URL must be a GitHub or GitLab repository (e.g. https://github.com/owner/repo).',
+    );
   }
 
-  static async fetchContext(repoUrl: string): Promise<RepoContextData> {
+  static async fetchContext(repoUrl: string, authToken?: string): Promise<RepoContextData> {
     const parsed = this.parseRepoUrl(repoUrl);
 
     if (parsed.provider === 'github') {
-      return this.fetchGitHub(parsed.owner, parsed.repo);
+      return this.fetchGitHub(parsed.owner, parsed.repo, authToken);
     }
-    return this.fetchGitLab(parsed.owner, parsed.repo);
+    return this.fetchGitLab(parsed.owner, parsed.repo, authToken);
   }
 
-  private static async fetchGitHub(owner: string, repo: string): Promise<RepoContextData> {
+  private static async fetchGitHub(owner: string, repo: string, authToken?: string): Promise<RepoContextData> {
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github+json',
       'User-Agent': 'TicketCraft',
     };
+    if (authToken) {
+      headers.Authorization = `Bearer ${authToken}`;
+    }
 
     const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
       headers,
@@ -117,9 +180,12 @@ export class RepoService {
     return await res.json() as Record<string, number>;
   }
 
-  private static async fetchGitLab(owner: string, repo: string): Promise<RepoContextData> {
+  private static async fetchGitLab(owner: string, repo: string, authToken?: string): Promise<RepoContextData> {
     const projectId = encodeURIComponent(`${owner}/${repo}`);
     const headers: Record<string, string> = { 'User-Agent': 'TicketCraft' };
+    if (authToken) {
+      headers['PRIVATE-TOKEN'] = authToken;
+    }
 
     const repoRes = await fetch(`https://gitlab.com/api/v4/projects/${projectId}`, {
       headers,

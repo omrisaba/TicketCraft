@@ -47,7 +47,8 @@ export class JiraController {
       await client.updateTicket(ticketKey.toUpperCase(), changes);
 
       res.json({ success: true, data: { message: 'Ticket updated successfully' } });
-      try { usageTracker.record(getCredentials(req).jiraEmail, 'sync_to_jira', ticketKey.toUpperCase()); } catch { /* non-critical */ }
+      usageTracker.record(getCredentials(req).jiraEmail, 'sync_to_jira', ticketKey.toUpperCase())
+        .catch((err) => console.warn('[USAGE] sync_to_jira record failed:', (err as Error).message));
     } catch (err) {
       next(err);
     }
@@ -84,7 +85,8 @@ export class JiraController {
       }
 
       res.json({ success: true, data: { key: created.key, id: created.id } });
-      try { usageTracker.record(getCredentials(req).jiraEmail, 'create_in_jira', created.key); } catch { /* non-critical */ }
+      usageTracker.record(getCredentials(req).jiraEmail, 'create_in_jira', created.key)
+        .catch((err) => console.warn('[USAGE] create_in_jira record failed:', (err as Error).message));
     } catch (err) {
       next(err);
     }
@@ -144,16 +146,16 @@ export class JiraController {
       const client = this.getClient(req);
       const result = await client.batchCreateTickets({ parentTicket, subtasks });
       res.json({ success: true, data: result });
-      try {
-        const email = getCredentials(req).jiraEmail;
-        const batchId = `batch_${Date.now()}`;
-        if (result.parent?.key) {
-          usageTracker.record(email, 'create_in_jira', result.parent.key, { batchId });
-        }
-        for (const st of result.subtasks || []) {
-          if (st.key) usageTracker.record(email, 'create_in_jira', st.key, { batchId });
-        }
-      } catch { /* non-critical */ }
+      const email = getCredentials(req).jiraEmail;
+      const batchId = `batch_${Date.now()}`;
+      const warn = (err: unknown) =>
+        console.warn('[USAGE] create_in_jira record failed:', (err as Error).message);
+      if (result.parent?.key) {
+        usageTracker.record(email, 'create_in_jira', result.parent.key, { batchId }).catch(warn);
+      }
+      for (const st of result.subtasks || []) {
+        if (st.key) usageTracker.record(email, 'create_in_jira', st.key, { batchId }).catch(warn);
+      }
     } catch (err) {
       next(err);
     }

@@ -51,12 +51,17 @@ export class McpClient {
       method: 'POST',
       headers,
       body: JSON.stringify(reqBody),
+      signal: AbortSignal.timeout(30_000),
     });
 
     const sid = resp.headers.get('mcp-session-id');
     if (sid) this.sessionId = sid;
 
     if (isNotification) {
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(`MCP ${method} failed: HTTP ${resp.status} — ${text.slice(0, 200)}`);
+      }
       await resp.text().catch(() => {});
       return undefined as T;
     }
@@ -87,20 +92,31 @@ export class McpClient {
    * from `data:` lines in `event: message` blocks.
    */
   private async parseSSE(text: string): Promise<any> {
-    const lines = text.split('\n');
-    let lastData: string | null = null;
+    const events = text.split(/\r?\n\r?\n/);
+    let lastJson: any = null;
 
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        lastData = line.slice(6);
+    for (const event of events) {
+      const dataLines: string[] = [];
+      for (const line of event.split(/\r?\n/)) {
+        if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trimStart());
+        }
+      }
+      if (dataLines.length === 0) continue;
+      const payload = dataLines.join('\n').trim();
+      if (!payload || payload === '[DONE]') continue;
+      try {
+        lastJson = JSON.parse(payload);
+      } catch {
+        // Keep scanning; some events may not be JSON-RPC payloads.
       }
     }
 
-    if (!lastData) {
+    if (!lastJson) {
       throw new Error('SSE response contained no data lines');
     }
 
-    return JSON.parse(lastData);
+    return lastJson;
   }
 
   async initialize(): Promise<void> {

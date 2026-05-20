@@ -18,13 +18,14 @@ export class MarkdownExporter implements Partial<ExportService> {
 
     if (score) {
       const badge = getScoreBadge(score.overall);
+      const escPipe = (s: string) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
       lines.push('');
       lines.push(`## Quality Score: ${score.overall}/100 (${badge})`);
       lines.push('');
       lines.push('| Dimension | Score | Feedback |');
       lines.push('|-----------|-------|----------|');
       for (const dim of score.dimensions) {
-        lines.push(`| ${dim.name} | ${dim.score}/${dim.maxScore} | ${dim.feedback} |`);
+        lines.push(`| ${escPipe(dim.name)} | ${dim.score}/${dim.maxScore} | ${escPipe(dim.feedback)} |`);
       }
     }
 
