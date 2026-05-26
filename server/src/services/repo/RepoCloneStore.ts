@@ -24,7 +24,10 @@ export class RepoCloneStore {
     token?: string,
   ): Promise<string> {
     const { provider, owner, repo } = RepoService.parseRepoUrl(repoUrl);
-    const key = `${provider}_${createHash('sha256').update(`${owner}/${repo}`).digest('hex').slice(0, 16)}`;
+    const tokenFingerprint = token
+      ? createHash('sha256').update(token).digest('hex').slice(0, 8)
+      : 'anon';
+    const key = `${provider}_${createHash('sha256').update(`${owner}/${repo}:${tokenFingerprint}`).digest('hex').slice(0, 16)}`;
     const repoDir = path.join(REPOS_DIR, key);
 
     const existing = cache.get(key);

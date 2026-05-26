@@ -5,6 +5,7 @@ import { verifiedCredentialExtractor } from '../middleware/credentialExtractor.j
 const router = Router();
 const controller = new AdminController();
 
+router.get('/check', verifiedCredentialExtractor, controller.checkAdmin);
 router.get('/settings', verifiedCredentialExtractor, controller.load);
 router.put('/settings', verifiedCredentialExtractor, controller.save);
 router.get('/cursor-models', verifiedCredentialExtractor, controller.cursorModels);

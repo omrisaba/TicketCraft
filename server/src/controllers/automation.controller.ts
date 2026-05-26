@@ -10,6 +10,8 @@ import { RepoService } from '../services/repo/RepoService.js';
 import { McpAgent } from '../services/mcp/McpAgent.js';
 import { AppError } from '../middleware/errorHandler.js';
 
+const MAX_SCAN_BATCH_SIZE = 25;
+
 export class AutomationController {
   /** Express may type params as string | string[] */
   private static singleRouteParam(raw: string | string[] | undefined): string | undefined {
@@ -32,6 +34,8 @@ export class AutomationController {
     }
   };
 
+  private static readonly MAX_JQL_LENGTH = 2000;
+
   /** Search Jira by JQL and return lightweight ticket metadata (no processing). */
   search = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -40,6 +44,9 @@ export class AutomationController {
         throw new AppError(400, 'BAD_REQUEST', 'JQL query is required.');
       }
       let effectiveJql = jql.trim();
+      if (effectiveJql.length > AutomationController.MAX_JQL_LENGTH) {
+        throw new AppError(400, 'BAD_REQUEST', `JQL query exceeds maximum length of ${AutomationController.MAX_JQL_LENGTH} characters.`);
+      }
       if (excludeProcessed) {
         effectiveJql = `(${effectiveJql}) AND (labels IS EMPTY OR labels NOT IN (${config.automation.doneLabel}))`;
       }
@@ -62,6 +69,9 @@ export class AutomationController {
 
       if (!ticketKeys || !Array.isArray(ticketKeys) || ticketKeys.length === 0) {
         throw new AppError(400, 'BAD_REQUEST', 'ticketKeys array is required.');
+      }
+      if (ticketKeys.length > MAX_SCAN_BATCH_SIZE) {
+        throw new AppError(400, 'BAD_REQUEST', `Maximum ${MAX_SCAN_BATCH_SIZE} tickets per scan batch.`);
       }
 
       const creds = getCredentials(req);

@@ -19,11 +19,16 @@ export class ExportController {
     try {
       const { ticket, improvements, score } = req.body;
 
+      if (!ticket?.key || !/^[A-Z][A-Z0-9]+-\d+$/i.test(ticket.key)) {
+        throw new AppError(400, 'INVALID_TICKET_KEY', 'Valid ticket key is required for export.');
+      }
+
       const exporter = new MarkdownExporter();
       const md = await exporter.exportAsMarkdown(ticket, improvements, score);
 
+      const safeKey = ticket.key.replace(/[^A-Za-z0-9_-]/g, '_');
       res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${ticket.key}-improved.md"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${safeKey}-improved.md"`);
       res.send(md);
     } catch (err) {
       next(err);

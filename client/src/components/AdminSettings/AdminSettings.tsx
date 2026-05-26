@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from '../../services/apiClient';
+import { api, formatApiErrorMessage } from '../../services/apiClient';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import type { AdminSettings as AdminSettingsType, GeminiModel } from 'ticketcraft-shared';
@@ -20,7 +20,7 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
   useEffect(() => {
     api.admin.loadSettings()
       .then((data) => setSettings(data as AdminSettingsType))
-      .catch((err: any) => setError(err.message || 'Failed to load settings.'))
+      .catch((err: any) => setError(formatApiErrorMessage(err) || 'Failed to load settings.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -35,7 +35,7 @@ export function AdminSettings({ onClose }: AdminSettingsProps) {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err: any) {
-      setError(err.message || 'Failed to save settings.');
+      setError(formatApiErrorMessage(err) || 'Failed to save settings.');
     } finally {
       setSaving(false);
     }

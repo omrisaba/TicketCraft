@@ -26,7 +26,20 @@ function assertAdmin(req: Request): void {
   }
 }
 
+function isAdmin(req: Request): boolean {
+  const { jiraEmail } = getCredentials(req);
+  return ADMIN_EMAILS.has(jiraEmail.toLowerCase());
+}
+
 export class AdminController {
+  checkAdmin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      res.json({ success: true, data: { isAdmin: isAdmin(req) } });
+    } catch (err) {
+      next(err);
+    }
+  };
+
   load = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       assertAdmin(req);

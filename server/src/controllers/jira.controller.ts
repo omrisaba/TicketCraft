@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import type { TicketChanges } from 'ticketcraft-shared';
 import { getCredentials, getParam } from '../types/index.js';
 import { JiraClient } from '../services/jira/JiraClient.js';
 import { AppError } from '../middleware/errorHandler.js';
@@ -12,13 +13,10 @@ export class JiraController {
 
   getTicket = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const ticketKey = getParam(req, 'ticketKey');
-      if (!ticketKey || !/^[A-Z][A-Z0-9]+-\d+$/i.test(ticketKey)) {
-        throw new AppError(400, 'INVALID_TICKET_KEY', `Invalid ticket key format: ${ticketKey}`);
-      }
+      const ticketKey = JiraController.validateTicketKey(getParam(req, 'ticketKey'));
 
       const client = this.getClient(req);
-      const ticket = await client.getTicket(ticketKey.toUpperCase());
+      const ticket = await client.getTicket(ticketKey);
 
       res.json({ success: true, data: ticket });
     } catch (err) {
@@ -26,11 +24,18 @@ export class JiraController {
     }
   };
 
+  private static validateTicketKey(raw: string): string {
+    if (!raw || !/^[A-Z][A-Z0-9]+-\d+$/i.test(raw)) {
+      throw new AppError(400, 'INVALID_TICKET_KEY', `Invalid ticket key format: ${raw}`);
+    }
+    return raw.toUpperCase();
+  }
+
   getLinkedTickets = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const ticketKey = getParam(req, 'ticketKey');
+      const ticketKey = JiraController.validateTicketKey(getParam(req, 'ticketKey'));
       const client = this.getClient(req);
-      const linked = await client.getLinkedTickets(ticketKey.toUpperCase());
+      const linked = await client.getLinkedTickets(ticketKey);
 
       res.json({ success: true, data: linked });
     } catch (err) {
@@ -38,16 +43,40 @@ export class JiraController {
     }
   };
 
+  private static pickTicketChanges(raw: Record<string, unknown>): TicketChanges {
+    const changes: TicketChanges = {};
+    if (raw.summary !== undefined && typeof raw.summary === 'string' && raw.summary.trim()) {
+      changes.summary = raw.summary;
+    }
+    if (raw.description !== undefined && typeof raw.description === 'string') {
+      changes.description = raw.description;
+    }
+    if (raw.acceptanceCriteria !== undefined && typeof raw.acceptanceCriteria === 'string') {
+      changes.acceptanceCriteria = raw.acceptanceCriteria;
+    }
+    if (raw.labels !== undefined && Array.isArray(raw.labels)) {
+      changes.labels = raw.labels.filter((l): l is string => typeof l === 'string');
+    }
+    if (raw.storyPoints !== undefined && (typeof raw.storyPoints === 'number' || raw.storyPoints === null)) {
+      changes.storyPoints = raw.storyPoints as number;
+    }
+    return changes;
+  }
+
   updateTicket = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const ticketKey = getParam(req, 'ticketKey');
-      const changes = req.body;
+      const ticketKey = JiraController.validateTicketKey(getParam(req, 'ticketKey'));
+      const changes = JiraController.pickTicketChanges(req.body);
+
+      if (Object.keys(changes).length === 0) {
+        throw new AppError(400, 'INVALID_UPDATE', 'No valid fields provided for update.');
+      }
 
       const client = this.getClient(req);
-      await client.updateTicket(ticketKey.toUpperCase(), changes);
+      await client.updateTicket(ticketKey, changes);
 
       res.json({ success: true, data: { message: 'Ticket updated successfully' } });
-      usageTracker.record(getCredentials(req).jiraEmail, 'sync_to_jira', ticketKey.toUpperCase())
+      usageTracker.record(getCredentials(req).jiraEmail, 'sync_to_jira', ticketKey)
         .catch((err) => console.warn('[USAGE] sync_to_jira record failed:', (err as Error).message));
     } catch (err) {
       next(err);
@@ -142,6 +171,9 @@ export class JiraController {
       if (!Array.isArray(subtasks) || subtasks.length === 0) {
         throw new AppError(400, 'INVALID_BATCH_CREATE', 'At least one subtask is required.');
       }
+      if (subtasks.length > 20) {
+        throw new AppError(400, 'INVALID_BATCH_CREATE', 'Maximum 20 subtasks per batch.');
+      }
 
       const client = this.getClient(req);
       const result = await client.batchCreateTickets({ parentTicket, subtasks });
@@ -161,18 +193,35 @@ export class JiraController {
     }
   };
 
+  private static readonly MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024; // 5 MB decoded
+  private static readonly MIME_RE = /^[\w.+\-]+\/[\w.+\-]+$/;
+
   uploadAttachment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const ticketKey = getParam(req, 'ticketKey');
+      const ticketKey = JiraController.validateTicketKey(getParam(req, 'ticketKey'));
       const { filename, content, mimeType } = req.body;
 
-      if (!filename || !content) {
-        throw new AppError(400, 'INVALID_ATTACHMENT', 'Filename and content are required');
+      if (!filename || typeof filename !== 'string') {
+        throw new AppError(400, 'INVALID_ATTACHMENT', 'Filename is required.');
+      }
+      if (!content || typeof content !== 'string') {
+        throw new AppError(400, 'INVALID_ATTACHMENT', 'Base64 content is required.');
+      }
+      if (filename.length > 255) {
+        throw new AppError(400, 'INVALID_ATTACHMENT', 'Filename must be 255 characters or fewer.');
+      }
+
+      const safeMime = (typeof mimeType === 'string' && JiraController.MIME_RE.test(mimeType))
+        ? mimeType
+        : 'application/octet-stream';
+
+      const fileBuffer = Buffer.from(content, 'base64');
+      if (fileBuffer.length > JiraController.MAX_ATTACHMENT_BYTES) {
+        throw new AppError(400, 'ATTACHMENT_TOO_LARGE', `Attachment exceeds ${JiraController.MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB limit.`);
       }
 
       const client = this.getClient(req);
-      const fileBuffer = Buffer.from(content, 'base64');
-      await client.uploadAttachment(ticketKey.toUpperCase(), fileBuffer, filename, mimeType || 'application/octet-stream');
+      await client.uploadAttachment(ticketKey, fileBuffer, filename, safeMime);
 
       res.json({ success: true, data: { message: 'Attachment uploaded successfully' } });
     } catch (err) {

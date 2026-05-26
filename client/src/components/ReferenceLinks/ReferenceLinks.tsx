@@ -19,6 +19,8 @@ export function ReferenceLinks({ links, onChange, disabled }: ReferenceLinksProp
   const [fetching, setFetching] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const linksRef = useRef(links);
+  linksRef.current = links;
 
   const isValidUrl = (url: string): boolean => {
     try {
@@ -43,10 +45,11 @@ export function ReferenceLinks({ links, onChange, disabled }: ReferenceLinksProp
     try {
       const result = await api.repo.fetchUrls([url]) as ReferenceLink[];
       const fetched = result[0];
-      onChange(updated.map((l) => (l.url === url ? fetched : l)));
-    } catch {
-      onChange(updated.map((l) =>
-        l.url === url ? { ...l, error: 'Failed to fetch', fetched: false } : l,
+      onChange(linksRef.current.map((l) => (l.url === url ? fetched : l)));
+    } catch (err: any) {
+      const detail = err?.message || 'Failed to fetch';
+      onChange(linksRef.current.map((l) =>
+        l.url === url ? { ...l, error: detail, fetched: false } : l,
       ));
     } finally {
       setFetching(false);
@@ -70,14 +73,14 @@ export function ReferenceLinks({ links, onChange, disabled }: ReferenceLinksProp
 
     try {
       const results = await api.repo.uploadFiles(fileArray) as ReferenceLink[];
+      const current = linksRef.current.filter((l) => !placeholders.some((p) => p.url === l.url));
+      onChange([...current, ...results]);
+    } catch (err: any) {
+      const detail = err?.message || 'Upload failed';
+      const current = linksRef.current.filter((l) => !placeholders.some((p) => p.url === l.url));
       onChange([
-        ...links,
-        ...results,
-      ]);
-    } catch {
-      onChange([
-        ...links,
-        ...placeholders.map((p) => ({ ...p, error: 'Upload failed', fetched: false })),
+        ...current,
+        ...placeholders.map((p) => ({ ...p, error: detail, fetched: false })),
       ]);
     } finally {
       setUploading(false);

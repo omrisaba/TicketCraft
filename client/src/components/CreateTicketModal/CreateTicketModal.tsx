@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Button } from '../ui/Button';
 import { Select } from '../ui/Select';
 import { Input } from '../ui/Input';
-import { api } from '../../services/apiClient';
+import { api, formatApiErrorMessage } from '../../services/apiClient';
 import type { Ticket, TicketChanges } from 'ticketcraft-shared';
 import { X, ExternalLink, Plus, Link2, GitBranch } from 'lucide-react';
 
@@ -79,7 +79,7 @@ export function CreateTicketModal({
 
       setCreatedKey(result.key);
     } catch (err: any) {
-      setError(err.message || 'Failed to create ticket.');
+      setError(formatApiErrorMessage(err) || 'Failed to create ticket.');
     } finally {
       setLoading(false);
     }

@@ -39,9 +39,21 @@ async function main() {
         console.log(`[HTTPS] Server running at https://${config.host}:${config.port}`);
       });
 
+      const allowedHosts = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
+      if (config.host && config.host !== '0.0.0.0') allowedHosts.add(config.host);
+      if (process.env.ALLOWED_HOST) allowedHosts.add(process.env.ALLOWED_HOST);
+
       const httpRedirect = http.createServer((req, res) => {
-        const redirectUrl = `https://${config.host}:${config.port}${req.url}`;
-        res.writeHead(301, { Location: redirectUrl });
+        const rawHost = (req.headers.host || '').replace(/:\d+$/, '');
+        const host = allowedHosts.has(rawHost) ? rawHost : 'localhost';
+        const safePath = (req.url || '/').replace(/[\r\n]/g, '');
+        try {
+          const parsed = new URL(safePath, `https://${host}`);
+          const redirectUrl = `https://${host}:${config.port}${parsed.pathname}${parsed.search}${parsed.hash}`;
+          res.writeHead(301, { Location: redirectUrl });
+        } catch {
+          res.writeHead(301, { Location: `https://${host}:${config.port}/` });
+        }
         res.end();
       });
 

@@ -34,7 +34,7 @@ export class McpClient {
       method,
       params,
     };
-    if (!isNotification) reqBody.id = Date.now();
+    if (!isNotification) reqBody.id = crypto.randomUUID();
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',

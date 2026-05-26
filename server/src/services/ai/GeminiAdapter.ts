@@ -142,21 +142,21 @@ export class GeminiAdapter implements AIProvider {
       `Description: ${ticket.description || '(empty)'}`,
       `Status: ${ticket.status}`,
       `Priority: ${ticket.priority || '(not set)'}`,
-      `Labels: ${ticket.labels.length > 0 ? ticket.labels.join(', ') : '(none)'}`,
+      `Labels: ${(ticket.labels?.length ?? 0) > 0 ? ticket.labels.join(', ') : '(none)'}`,
       `Story Points: ${ticket.storyPoints ?? '(not set)'}`,
       `Acceptance Criteria: ${ticket.acceptanceCriteria || '(none)'}`,
       `Assignee: ${ticket.assignee || '(unassigned)'}`,
       `Reporter: ${ticket.reporter || '(unknown)'}`,
     ];
 
-    if (ticket.comments.length > 0) {
+    if ((ticket.comments?.length ?? 0) > 0) {
       parts.push(`\nComments (${ticket.comments.length}):`);
       ticket.comments.slice(0, 10).forEach((c) => {
         parts.push(`  - ${c.author}: ${c.body}`);
       });
     }
 
-    if (ticket.attachments.length > 0) {
+    if ((ticket.attachments?.length ?? 0) > 0) {
       parts.push(`\nAttachments: ${ticket.attachments.map((a) => a.filename).join(', ')}`);
     }
 
@@ -517,7 +517,7 @@ Improved version:
 Summary: ${improved.summary || original.summary}
 Description: ${improved.description || original.description}
 Acceptance Criteria: ${improved.acceptanceCriteria || original.acceptanceCriteria || '(none)'}
-Labels: ${improved.labels?.join(', ') || original.labels.join(', ')}
+Labels: ${improved.labels?.join(', ') || original.labels?.join(', ') || '(none)'}
 Story Points: ${improved.storyPoints ?? original.storyPoints ?? '(not set)'}
 
 For each change, explain the reasoning. Be concise but informative.
@@ -573,7 +573,7 @@ Current improved version:
 Summary: ${currentImprovements.summary || ticket.summary}
 Description: ${currentImprovements.description || ticket.description || '(empty)'}
 Acceptance Criteria: ${currentImprovements.acceptanceCriteria || ticket.acceptanceCriteria || '(none)'}
-Labels: ${currentImprovements.labels?.join(', ') || ticket.labels.join(', ')}
+Labels: ${currentImprovements.labels?.join(', ') || ticket.labels?.join(', ') || '(none)'}
 Story Points: ${currentImprovements.storyPoints ?? ticket.storyPoints ?? '(not set)'}
 ${historySection}${repoSection}${refSection}${skillsSection}
 

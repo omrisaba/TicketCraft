@@ -114,10 +114,11 @@ export class RepoService {
     });
 
     if (!repoRes.ok) {
+      const errBody = await repoRes.text().catch(() => '');
       if (repoRes.status === 404) {
-        throw new AppError(404, 'REPO_NOT_FOUND', `Repository ${owner}/${repo} not found or is private.`);
+        throw new AppError(404, 'REPO_NOT_FOUND', `Repository ${owner}/${repo} not found or is private.`, errBody);
       }
-      throw new AppError(502, 'GITHUB_API_ERROR', `GitHub API error: ${repoRes.status}`);
+      throw new AppError(502, 'GITHUB_API_ERROR', `GitHub API error: ${repoRes.status}`, errBody);
     }
 
     const repoData = await repoRes.json() as any;
@@ -193,10 +194,11 @@ export class RepoService {
     });
 
     if (!repoRes.ok) {
+      const errBody = await repoRes.text().catch(() => '');
       if (repoRes.status === 404) {
-        throw new AppError(404, 'REPO_NOT_FOUND', `Repository ${owner}/${repo} not found or is private.`);
+        throw new AppError(404, 'REPO_NOT_FOUND', `Repository ${owner}/${repo} not found or is private.`, errBody);
       }
-      throw new AppError(502, 'GITLAB_API_ERROR', `GitLab API error: ${repoRes.status}`);
+      throw new AppError(502, 'GITLAB_API_ERROR', `GitLab API error: ${repoRes.status}`, errBody);
     }
 
     const repoData = await repoRes.json() as any;

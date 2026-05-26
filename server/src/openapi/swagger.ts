@@ -3,6 +3,7 @@ import path from 'path';
 import type { Express } from 'express';
 import { fileURLToPath } from 'url';
 import swaggerUi from 'swagger-ui-express';
+import { verifiedCredentialExtractor } from '../middleware/credentialExtractor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SPEC_PATH = path.join(__dirname, 'openapi.json');
@@ -25,13 +26,12 @@ export function setupSwagger(app: Express): void {
       persistAuthorization: true,
       docExpansion: 'list',
       filter: true,
-      tryItOutEnabled: true,
     },
   };
 
-  app.get('/api/openapi.json', (_req, res) => {
+  app.get('/api/openapi.json', verifiedCredentialExtractor, (_req, res) => {
     res.json(openapiDocument);
   });
 
-  app.use('/api/docs', ...swaggerUi.serve, swaggerUi.setup(openapiDocument, options));
+  app.use('/api/docs', verifiedCredentialExtractor, ...swaggerUi.serve, swaggerUi.setup(openapiDocument, options));
 }

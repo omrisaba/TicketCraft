@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import { credentialExtractor } from '../middleware/credentialExtractor.js';
+import { verifiedCredentialExtractor } from '../middleware/credentialExtractor.js';
 import { JiraController } from '../controllers/jira.controller.js';
 
 const router = Router();
 const controller = new JiraController();
 
-router.use(credentialExtractor);
+router.use(verifiedCredentialExtractor);
 
 router.get('/projects', controller.getProjects);
 router.get('/projects/:projectKey/issuetypes', controller.getIssueTypes);

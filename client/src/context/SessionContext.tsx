@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import type { SessionCredentials, GeminiModel, HistoryEntry, AppConfig, RepoContext } from 'ticketcraft-shared';
-import { updateApiModel, updateApiTemperature } from '../services/apiClient';
+import { api, updateApiModel, updateApiTemperature, clearApiCredentials } from '../services/apiClient';
 
 interface JiraUser {
   displayName: string;
@@ -13,6 +13,7 @@ interface SessionState {
   credentials: SessionCredentials | null;
   jiraUser: JiraUser | null;
   appConfig: AppConfig | null;
+  isAdmin: boolean;
   history: HistoryEntry[];
   repoContext: RepoContext | null;
   geminiTemperature: number;
@@ -37,6 +38,7 @@ const INITIAL_STATE: SessionState = {
   credentials: null,
   jiraUser: null,
   appConfig: null,
+  isAdmin: false,
   history: [],
   repoContext: null,
   geminiTemperature: 0.3,
@@ -52,6 +54,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const warningRef = useRef<ReturnType<typeof setTimeout>>(null);
 
   const endSession = useCallback(() => {
+    clearApiCredentials();
     setState((prev) => ({ ...INITIAL_STATE, appConfig: prev.appConfig }));
     setSessionWarning(false);
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -94,11 +97,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       isActive: true,
       credentials: creds,
       jiraUser,
+      isAdmin: false,
       history: [],
     }));
     setSessionWarning(false);
     warningRef.current = setTimeout(() => setSessionWarning(true), INACTIVITY_TIMEOUT_MS - WARNING_BEFORE_MS);
     timeoutRef.current = setTimeout(endSession, INACTIVITY_TIMEOUT_MS);
+    api.admin.checkAdmin()
+      .then((result) => {
+        if ((result as { isAdmin: boolean }).isAdmin) {
+          setState((prev) => ({ ...prev, isAdmin: true }));
+        }
+      })
+      .catch(() => {});
   }, [endSession]);
 
   const addHistoryEntry = useCallback((entry: HistoryEntry) => {
@@ -106,12 +117,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateHistoryEntry = useCallback((ticketKey: string, update: Partial<HistoryEntry>) => {
-    setState((prev) => ({
-      ...prev,
-      history: prev.history.map((h) =>
-        h.ticketKey === ticketKey ? { ...h, ...update } : h,
-      ),
-    }));
+    setState((prev) => {
+      const lastIdx = prev.history.reduce<number>(
+        (found, h, i) => (h.ticketKey === ticketKey ? i : found),
+        -1,
+      );
+      if (lastIdx === -1) return prev;
+      return {
+        ...prev,
+        history: prev.history.map((h, i) =>
+          i === lastIdx ? { ...h, ...update } : h,
+        ),
+      };
+    });
   }, []);
 
   const setGeminiModel = useCallback((model: GeminiModel) => {

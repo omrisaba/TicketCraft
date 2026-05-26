@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSession } from '../../context/SessionContext';
-import { api } from '../../services/apiClient';
+import { api, formatApiErrorMessage } from '../../services/apiClient';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Select } from '../ui/Select';
@@ -39,7 +39,7 @@ import {
 type ComposeStep = 'setup' | 'composing' | 'review' | 'breaking' | 'breakdown' | 'creating' | 'done';
 
 export function ComposeWorkspace() {
-  const { repoContext, appConfig, credentials, jiraUser, setGeminiModel, setGeminiTemperature, geminiTemperature, addHistoryEntry } = useSession();
+  const { repoContext, appConfig, credentials, jiraUser, setGeminiModel, setGeminiTemperature, geminiTemperature, addHistoryEntry, isAdmin } = useSession();
 
   // Setup state
   const [projects, setProjects] = useState<JiraProject[]>([]);
@@ -72,7 +72,7 @@ export function ComposeWorkspace() {
   const [showLogs, setShowLogs] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
 
-  const isAdmin = !!(jiraUser?.emailAddress && appConfig?.adminEmails?.includes(jiraUser.emailAddress.toLowerCase()));
+  // isAdmin is now provided by SessionContext after login
 
   useEffect(() => {
     setLoadingProjects(true);
@@ -205,7 +205,7 @@ export function ComposeWorkspace() {
       setComposed(result.improvedTicket);
       setStep('review');
     } catch (err: any) {
-      setError(err.message || 'Composition failed.');
+      setError(formatApiErrorMessage(err) || 'Composition failed.');
       setStep('setup');
     }
   }, [freeText, projectKey, issueType, selectedTemplate, detailLevel, repoContextPrompt, referenceContent, connectedRepoUrl, useCursor]);
@@ -230,7 +230,7 @@ export function ComposeWorkspace() {
       setBreakdownRationale(result.rationale);
       setStep('breakdown');
     } catch (err: any) {
-      setError(err.message || 'Breakdown failed.');
+      setError(formatApiErrorMessage(err) || 'Breakdown failed.');
       setStep('review');
     }
   };
@@ -251,7 +251,7 @@ export function ComposeWorkspace() {
       scoreAndSaveHistory(result.key, result.id, composed).catch(() => {});
       setStep('done');
     } catch (err: any) {
-      setError(err.message || 'Failed to create ticket.');
+      setError(formatApiErrorMessage(err) || 'Failed to create ticket.');
     } finally {
       setLoading(false);
     }
@@ -283,7 +283,7 @@ export function ComposeWorkspace() {
       scoreAndSaveHistory(result.parent.key, result.parent.id, composed).catch(() => {});
       setStep('done');
     } catch (err: any) {
-      setError(err.message || 'Batch creation failed.');
+      setError(formatApiErrorMessage(err) || 'Batch creation failed.');
       setStep('breakdown');
     }
   };

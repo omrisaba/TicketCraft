@@ -131,6 +131,7 @@ export class RepoController {
       const res = await fetch(rawUrl, {
         headers: { 'User-Agent': 'TicketCraft' },
         signal: AbortSignal.timeout(15_000),
+        redirect: 'error',
       });
 
       if (!res.ok) {

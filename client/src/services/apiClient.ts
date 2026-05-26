@@ -96,6 +96,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
         data.error?.message || 'Unknown error',
         data.error?.code || 'UNKNOWN',
         response.status,
+        data.error?.details,
       );
     }
 
@@ -119,10 +120,89 @@ export class ApiClientError extends Error {
     message: string,
     public code: string,
     public statusCode: number,
+    public details?: string,
   ) {
     super(message);
     this.name = 'ApiClientError';
   }
+}
+
+const JIRA_FIELD_LABELS: Record<string, string> = {
+  customfield_10016: 'Story Points',
+};
+
+function formatJiraFieldName(field: string): string {
+  return JIRA_FIELD_LABELS[field] || field;
+}
+
+/**
+ * Builds a user-friendly error message from an API error, surfacing
+ * server-side `details` (Jira field errors, Gemini bodies, validation, etc.)
+ * instead of the generic wrapper message.
+ */
+export function formatApiErrorMessage(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  if (!(err instanceof ApiClientError) || !err.details) return err.message;
+
+  const { code, details } = err;
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(details);
+  } catch {
+    const trimmed = details.length > 200 ? details.slice(0, 200) + '…' : details;
+    return `${err.message} — ${trimmed}`;
+  }
+
+  if (code === 'JIRA_API_ERROR' || code === 'JIRA_ATTACHMENT_ERROR' || code === 'JIRA_NOT_FOUND') {
+    return formatJiraDetails(err.message, parsed);
+  }
+
+  if (code === 'GEMINI_API_ERROR') {
+    const detail = typeof parsed === 'object'
+      ? (parsed.error?.message || JSON.stringify(parsed).slice(0, 200))
+      : String(parsed).slice(0, 200);
+    return `Gemini service error — ${detail}`;
+  }
+
+  if (code === 'VALIDATION_ERROR' && typeof details === 'string') {
+    return `${err.message}: ${details}`;
+  }
+
+  const fallback = JSON.stringify(parsed).slice(0, 300);
+  return `${err.message} — ${fallback}`;
+}
+
+function formatJiraDetails(baseMessage: string, parsed: any): string {
+  const parts: string[] = [];
+
+  const errorMessages: string[] = parsed.errorMessages || [];
+  const fieldErrors: Record<string, string> = parsed.errors || {};
+
+  if (errorMessages.length > 0) {
+    parts.push(...errorMessages);
+  }
+
+  const fieldEntries = Object.entries(fieldErrors);
+  if (fieldEntries.length > 0) {
+    const allScreenError = fieldEntries.length >= 1
+      && fieldEntries.every(([, msg]) =>
+        typeof msg === 'string' && msg.includes('not on the appropriate screen'));
+
+    if (allScreenError) {
+      const fields = fieldEntries.map(([f]) => formatJiraFieldName(f)).join(', ');
+      parts.push(
+        `Jira won't allow editing ${fields}. The issue may be Closed or in a read-only workflow status — reopen it in Jira and try again.`,
+      );
+    } else {
+      for (const [field, msg] of fieldEntries) {
+        parts.push(`${formatJiraFieldName(field)}: ${msg}`);
+      }
+    }
+  }
+
+  if (parts.length === 0) return baseMessage;
+  return parts.join(' ');
 }
 
 export const api = {
@@ -221,6 +301,7 @@ export const api = {
             data.error?.message || 'Upload failed',
             data.error?.code || 'UNKNOWN',
             response.status,
+            data.error?.details,
           );
         }
         return data.data;
@@ -283,6 +364,7 @@ export const api = {
   },
 
   admin: {
+    checkAdmin: () => request<{ isAdmin: boolean }>('/api/admin/check'),
     loadSettings: () => request('/api/admin/settings'),
     saveSettings: (settings: unknown) =>
       request('/api/admin/settings', { method: 'PUT', body: JSON.stringify(settings) }),

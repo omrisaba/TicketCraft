@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Button } from '../ui/Button';
-import { api } from '../../services/apiClient';
+import { api, formatApiErrorMessage } from '../../services/apiClient';
 import type { Ticket, TicketChanges, TicketScore } from 'ticketcraft-shared';
 import { FileText } from 'lucide-react';
 
@@ -27,8 +27,8 @@ export function ExportPanel({ ticket, improvements, score }: ExportPanelProps) {
       a.download = `${ticket.key}-improved.md`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch {
-      setError('Export failed. Please try again.');
+    } catch (err: any) {
+      setError(formatApiErrorMessage(err) || 'Export failed. Please try again.');
     } finally {
       setLoading(null);
     }

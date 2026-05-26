@@ -26,12 +26,7 @@ if (config.trustProxy) {
   app.set('trust proxy', 1);
 }
 
-app.use((req, res, next) => {
-  if (req.path.startsWith('/api/docs') || req.path.startsWith('/api/openapi.json')) {
-    return next();
-  }
-  securityHeaders(req, res, next);
-});
+app.use(securityHeaders);
 app.use(cors(config.cors));
 app.use(rateLimiter);
 app.use(requestLogger);

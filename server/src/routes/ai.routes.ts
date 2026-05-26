@@ -1,12 +1,12 @@
 import { Router } from 'express';
-import { credentialExtractor } from '../middleware/credentialExtractor.js';
+import { verifiedCredentialExtractor } from '../middleware/credentialExtractor.js';
 import { aiRateLimiter } from '../middleware/rateLimiter.js';
 import { AIController } from '../controllers/ai.controller.js';
 
 const router = Router();
 const controller = new AIController();
 
-router.use(credentialExtractor);
+router.use(verifiedCredentialExtractor);
 router.use(aiRateLimiter);
 
 router.post('/score', controller.score);

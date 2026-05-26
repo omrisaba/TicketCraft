@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type FormEvent } from 'react';
-import { api } from '../../services/apiClient';
+import { api, formatApiErrorMessage } from '../../services/apiClient';
 import { Button } from '../ui/Button';
 import type { Ticket, TicketChanges, RefinementMessage, RefineResponse } from 'ticketcraft-shared';
 import { Send, MessageSquare, Loader2, Bot, User } from 'lucide-react';
@@ -63,7 +63,7 @@ export function RefinementChat({ ticket, improvements, repoContextPrompt, refere
       const errorMsg: RefinementMessage = {
         id: `msg_${Date.now()}_err`,
         role: 'assistant',
-        content: `Failed to apply refinement: ${err.message || 'Unknown error'}`,
+        content: `Failed to apply refinement: ${formatApiErrorMessage(err) || 'Unknown error'}`,
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, errorMsg]);

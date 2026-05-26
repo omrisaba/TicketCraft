@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSession } from '../../context/SessionContext';
-import { api } from '../../services/apiClient';
+import { api, formatApiErrorMessage } from '../../services/apiClient';
 import { Card } from '../ui/Card';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
@@ -39,7 +39,7 @@ export function RepoConnector() {
       setRepoUrl('');
       api.automation.saveRepoUrl(url).catch(() => {});
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch repository.');
+      setError(formatApiErrorMessage(err) || 'Failed to fetch repository.');
     } finally {
       setLoading(false);
     }

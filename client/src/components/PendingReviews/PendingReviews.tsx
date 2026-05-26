@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../../services/apiClient';
+import { api, formatApiErrorMessage } from '../../services/apiClient';
 import { useSession } from '../../context/SessionContext';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -78,7 +78,7 @@ export function PendingReviews({ onReview }: PendingReviewsProps) {
       setSelected(new Set(data.tickets.map((t) => t.key)));
       setPhase('results');
     } catch (err: any) {
-      setError(err.message || 'Search failed.');
+      setError(formatApiErrorMessage(err) || 'Search failed.');
     } finally {
       setSearching(false);
     }
@@ -99,7 +99,7 @@ export function PendingReviews({ onReview }: PendingReviewsProps) {
       setPhase('idle');
       await loadPending();
     } catch (err: any) {
-      setError(err.message || 'Processing failed.');
+      setError(formatApiErrorMessage(err) || 'Processing failed.');
       setPhase('results');
     } finally {
       setCrafting(false);

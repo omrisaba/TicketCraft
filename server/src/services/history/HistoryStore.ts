@@ -44,7 +44,7 @@ export class HistoryStore {
       const jsonFiles = files.filter((f) => f.endsWith('.json'));
 
       const results = await Promise.allSettled(
-        jsonFiles.map(async (file) => {
+        jsonFiles.map(async (file): Promise<HistoryListItem> => {
           const raw = await fs.readFile(path.join(dir, file), 'utf-8');
           const snap = JSON.parse(raw) as HistorySnapshot;
           return {
@@ -56,7 +56,7 @@ export class HistoryStore {
             syncedAt: snap.syncedAt,
             savedAt: snap.savedAt,
             type: snap.type ?? 'improved',
-          } satisfies HistoryListItem;
+          };
         }),
       );
 
@@ -93,7 +93,7 @@ export class HistoryStore {
     const snap = await this.load(email, id);
     if (snap) {
       snap.syncedAt = syncedAt;
-      if (finalScore) {
+      if (finalScore && snap.score) {
         if (snap.originalScore === undefined) {
           snap.originalScore = snap.score.overall;
         }

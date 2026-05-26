@@ -79,15 +79,10 @@ export class SessionController {
           defaultModel: adminSettings.defaultModel,
           defaultTemperature: adminSettings.defaultTemperature,
           availableModels: AVAILABLE_MODELS,
-          githubMcpUrl: adminSettings.githubMcpUrl,
-          gitlabMcpUrl: adminSettings.gitlabMcpUrl,
-          mcpMaxRounds: adminSettings.mcpMaxRounds,
-          mcpMaxToolCalls: adminSettings.mcpMaxToolCalls,
+          githubMcpConfigured: !!adminSettings.githubMcpUrl,
+          gitlabMcpConfigured: !!adminSettings.gitlabMcpUrl,
           cursorEnabled: adminSettings.cursorEnabled,
-          adminEmails: (process.env.ADMIN_EMAILS || '')
-            .split(',')
-            .map((e) => e.trim().toLowerCase())
-            .filter(Boolean),
+          adminPortalEnabled: !!(process.env.ADMIN_EMAILS || '').trim(),
         },
       });
     } catch (err) {

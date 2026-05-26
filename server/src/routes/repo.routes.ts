@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import { credentialExtractor } from '../middleware/credentialExtractor.js';
+import { verifiedCredentialExtractor } from '../middleware/credentialExtractor.js';
 import { RepoController, upload } from '../controllers/repo.controller.js';
 
 const router = Router();
 const controller = new RepoController();
 
-router.use(credentialExtractor);
+router.use(verifiedCredentialExtractor);
 
 router.post('/context', controller.fetchContext);
 router.post('/fetch-urls', controller.fetchUrls);

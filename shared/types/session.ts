@@ -35,10 +35,8 @@ export interface AppConfig {
   defaultModel: GeminiModel;
   defaultTemperature: number;
   availableModels: { id: GeminiModel; label: string }[];
-  githubMcpUrl: string;
-  gitlabMcpUrl: string;
-  mcpMaxRounds: number;
-  mcpMaxToolCalls: number;
+  githubMcpConfigured: boolean;
+  gitlabMcpConfigured: boolean;
   cursorEnabled: boolean;
-  adminEmails: string[];
+  adminPortalEnabled: boolean;
 }

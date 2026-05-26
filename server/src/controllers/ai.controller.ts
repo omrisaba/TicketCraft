@@ -161,6 +161,7 @@ export class AIController {
           keepAlive.stop();
           const msg = err?.message || 'Cursor improve failed';
           const code = err?.code || 'CURSOR_ERROR';
+          res.status(502);
           res.end(JSON.stringify({ success: false, error: { code, message: msg } }));
         }
         return;
@@ -260,6 +261,7 @@ export class AIController {
           keepAlive.stop();
           const msg = err?.message || 'Cursor compose failed';
           const code = err?.code || 'CURSOR_ERROR';
+          res.status(502);
           res.end(JSON.stringify({ success: false, error: { code, message: msg } }));
         }
         return;
@@ -341,10 +343,12 @@ export class AIController {
         throw new AppError(400, 'INVALID_BREAKDOWN', 'ticket with a summary is required.');
       }
 
+      const clampedMaxTasks = Math.min(Math.max(1, Number(maxTasks) || 8), 20);
+
       const breakdownOpts = {
         issueType,
         subtaskType,
-        maxTasks,
+        maxTasks: clampedMaxTasks,
         referenceContent,
         skillsMarkdown,
         detailLevel,
@@ -360,6 +364,7 @@ export class AIController {
           keepAlive.stop();
           const msg = err?.message || 'Cursor breakdown failed';
           const code = err?.code || 'CURSOR_ERROR';
+          res.status(502);
           res.end(JSON.stringify({ success: false, error: { code, message: msg } }));
         }
         return;
@@ -477,13 +482,17 @@ export class AIController {
     }
   };
 
+  private static readonly MAX_REFINEMENT_HISTORY = 20;
+
   refine = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { ticket, currentImprovements, instruction, conversationHistory, repoContextPrompt, referenceContent, repoUrl } = req.body;
       const skillsMarkdown = parseSkillsMarkdown(req.body);
       const { prompt: enrichedPrompt } = await this.enrichWithMcpFromReq(req, ticket, repoUrl, repoContextPrompt);
+      const rawHistory = Array.isArray(conversationHistory) ? conversationHistory : [];
+      const trimmedHistory = rawHistory.slice(-AIController.MAX_REFINEMENT_HISTORY);
       const ai = this.getAI(req);
-      const result = await ai.refineTicket(ticket, currentImprovements, instruction, conversationHistory || [], enrichedPrompt, referenceContent, skillsMarkdown);
+      const result = await ai.refineTicket(ticket, currentImprovements, instruction, trimmedHistory, enrichedPrompt, referenceContent, skillsMarkdown);
 
       res.json({ success: true, data: result });
     } catch (err) {

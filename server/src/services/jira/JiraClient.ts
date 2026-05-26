@@ -117,7 +117,7 @@ export class JiraClient implements IssueTracker {
 
     const hasDescription = changes.description !== undefined;
     const hasAc = changes.acceptanceCriteria !== undefined && changes.acceptanceCriteria !== null;
-    if (hasDescription || hasAc) {
+    if (hasDescription) {
       let fullDescription = changes.description ?? '';
       if (changes.acceptanceCriteria) {
         fullDescription += `\n\n## Acceptance Criteria\n\n${changes.acceptanceCriteria}`;
@@ -125,6 +125,11 @@ export class JiraClient implements IssueTracker {
       if (fullDescription) {
         updateFields.description = this.textToAdf(fullDescription);
       }
+    } else if (hasAc) {
+      const existing = await this.getTicket(ticketKey);
+      let fullDescription = existing.description ?? '';
+      fullDescription += `\n\n## Acceptance Criteria\n\n${changes.acceptanceCriteria}`;
+      updateFields.description = this.textToAdf(fullDescription);
     }
 
     if (changes.labels !== undefined) {
@@ -135,10 +140,6 @@ export class JiraClient implements IssueTracker {
       updateFields.customfield_10016 = changes.storyPoints;
     }
 
-    if (ticketKey.split('-')[0].toUpperCase() === 'GENIE') {
-      updateFields.components = [{ name: 'UnifAI' }];
-    }
-
     await this.request(`/issue/${ticketKey}`, {
       method: 'PUT',
       body: JSON.stringify({ fields: updateFields }),
@@ -147,8 +148,10 @@ export class JiraClient implements IssueTracker {
 
   async uploadAttachment(ticketKey: string, file: Buffer, filename: string, mimeType: string): Promise<void> {
     const boundary = `----FormBoundary${Date.now()}`;
+    const safeFilename = filename.replace(/[\r\n]/g, ' ').replace(/"/g, '\\"');
+    const safeMimeType = /^[\w.+\-]+\/[\w.+\-]+$/.test(mimeType) ? mimeType : 'application/octet-stream';
     const body = Buffer.concat([
-      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${mimeType}\r\n\r\n`),
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${safeFilename}"\r\nContent-Type: ${safeMimeType}\r\n\r\n`),
       file,
       Buffer.from(`\r\n--${boundary}--\r\n`),
     ]);
@@ -197,9 +200,6 @@ export class JiraClient implements IssueTracker {
     if (opts.changes.storyPoints != null) fields.customfield_10016 = opts.changes.storyPoints;
     if (opts.parentKey) fields.parent = { key: opts.parentKey };
     if (opts.assigneeAccountId) fields.assignee = { accountId: opts.assigneeAccountId };
-    if (opts.projectKey.toUpperCase() === 'GENIE') {
-      fields.components = [{ name: 'UnifAI' }];
-    }
 
     const data = await this.request<any>('/issue', {
       method: 'POST',
