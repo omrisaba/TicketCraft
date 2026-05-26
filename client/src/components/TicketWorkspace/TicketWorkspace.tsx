@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react';
 import { useSession } from '../../context/SessionContext';
-import { api } from '../../services/apiClient';
+import { api, formatApiErrorMessage } from '../../services/apiClient';
 import { Card } from '../ui/Card';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
@@ -73,6 +73,30 @@ import {
   BarChart3,
 } from 'lucide-react';
 
+function diffChanges(original: Ticket, changes: TicketChanges): TicketChanges {
+  const result: TicketChanges = {};
+  if (changes.summary !== undefined && changes.summary !== original.summary) {
+    result.summary = changes.summary;
+  }
+  if (changes.description !== undefined && changes.description !== (original.description ?? '')) {
+    result.description = changes.description;
+  }
+  if (changes.acceptanceCriteria !== undefined && changes.acceptanceCriteria !== (original.acceptanceCriteria ?? '')) {
+    result.acceptanceCriteria = changes.acceptanceCriteria;
+  }
+  if (changes.labels !== undefined) {
+    const origSorted = [...(original.labels || [])].sort();
+    const newSorted = [...changes.labels].sort();
+    if (JSON.stringify(origSorted) !== JSON.stringify(newSorted)) {
+      result.labels = changes.labels;
+    }
+  }
+  if (changes.storyPoints !== undefined && changes.storyPoints !== original.storyPoints) {
+    result.storyPoints = changes.storyPoints;
+  }
+  return result;
+}
+
 type WorkspaceStep = 'fetch' | 'scored' | 'improving' | 'review';
 
 const STEPS: { id: WorkspaceStep; label: string; icon: typeof ClipboardCheck }[] = [
@@ -82,7 +106,7 @@ const STEPS: { id: WorkspaceStep; label: string; icon: typeof ClipboardCheck }[]
 ];
 
 export function TicketWorkspace() {
-  const { jiraUser, appConfig, credentials, repoContext, setRepoContext, endSession, setGeminiModel, setGeminiTemperature, geminiTemperature, addHistoryEntry, updateHistoryEntry, sessionWarning } = useSession();
+  const { jiraUser, appConfig, credentials, repoContext, setRepoContext, endSession, setGeminiModel, setGeminiTemperature, geminiTemperature, addHistoryEntry, updateHistoryEntry, sessionWarning, isAdmin } = useSession();
   const repoContextPrompt = repoContext?.promptContext || undefined;
   const connectedRepoUrl = repoContext?.info
     ? `https://${repoContext.info.provider}.com/${repoContext.info.owner}/${repoContext.info.repo}`
@@ -125,7 +149,6 @@ export function TicketWorkspace() {
   const [viewingHistoryId, setViewingHistoryId] = useState<string | null>(null);
   const [automationTicketKey, setAutomationTicketKey] = useState<string | null>(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-  const isAdmin = !!(jiraUser?.emailAddress && appConfig?.adminEmails?.includes(jiraUser.emailAddress.toLowerCase()));
 
   const [fetchLoading, setFetchLoading] = useState(false);
   const [scoreLoading, setScoreLoading] = useState(false);
@@ -140,6 +163,7 @@ export function TicketWorkspace() {
   const [userSkillsMarkdown, setUserSkillsMarkdown] = useState('');
   const [showUserSkills, setShowUserSkills] = useState(false);
   const draftChecked = useRef(false);
+  const fetchIdRef = useRef(0);
   /** For expanding custom skills once when entering Review with content */
   const priorStepRef = useRef<WorkspaceStep>('fetch');
 
@@ -233,8 +257,8 @@ export function TicketWorkspace() {
           setRepoContext(ctx);
         } catch { /* repo context is best-effort */ }
       }
-    } catch {
-      setError('Failed to restore draft.');
+    } catch (err: any) {
+      setError(formatApiErrorMessage(err) || 'Failed to restore draft.');
     } finally {
       setStatusMessage(null);
     }
@@ -272,7 +296,7 @@ export function TicketWorkspace() {
       saveSnapshot(result.ticket, result.score, result.improvements, result.annotations || []).catch(() => {});
       setAutomationTicketKey(ticketKey);
     } catch (err: any) {
-      setError(err.message || 'Failed to load automation result.');
+      setError(formatApiErrorMessage(err) || 'Failed to load automation result.');
     } finally {
       setStatusMessage(null);
     }
@@ -308,6 +332,7 @@ export function TicketWorkspace() {
   const handleFetch = async (e: FormEvent) => {
     e.preventDefault();
     if (!ticketKey.trim()) return;
+    const currentFetchId = ++fetchIdRef.current;
     setError(null);
     setFetchLoading(true);
     const savedLinks = referenceLinks;
@@ -317,6 +342,7 @@ export function TicketWorkspace() {
     try {
       setStatusMessage('Fetching ticket from Jira...');
       const ticketData = await api.jira.getTicket(ticketKey.trim().toUpperCase()) as Ticket;
+      if (fetchIdRef.current !== currentFetchId) return;
       setTicket(ticketData);
       setTicketKey(ticketData.key);
       setDetailLevel(suggestedDetailLevel(ticketData.issueType));
@@ -338,10 +364,12 @@ export function TicketWorkspace() {
         }
       } catch { /* linked tickets are optional */ }
 
+      if (fetchIdRef.current !== currentFetchId) return;
       setScoreLoading(true);
       setStatusMessage('AI is analyzing ticket quality...');
       const referenceContent = formatReferenceContent(savedLinks);
       const scoreResult = await api.ai.score({ ticket: ticketData, linkedTickets: fetchedLinked.length > 0 ? fetchedLinked : undefined, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl }) as TicketScore;
+      if (fetchIdRef.current !== currentFetchId) return;
       setScore(scoreResult);
       setOriginalScore(scoreResult.overall);
       setStep('scored');
@@ -356,7 +384,7 @@ export function TicketWorkspace() {
       });
 
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch ticket.');
+      setError(formatApiErrorMessage(err) || 'Failed to fetch ticket.');
     } finally {
       setFetchLoading(false);
       setScoreLoading(false);
@@ -381,8 +409,8 @@ export function TicketWorkspace() {
         repoUrl: connectedRepoUrl,
       }) as { questions: GuidingQuestion[] };
       setQuestions(qResult.questions || []);
-    } catch {
-      setError('Failed to generate guiding questions.');
+    } catch (err: any) {
+      setError(formatApiErrorMessage(err) || 'Failed to generate guiding questions.');
     } finally {
       setQuestionsLoading(false);
       setStatusMessage(null);
@@ -425,8 +453,10 @@ export function TicketWorkspace() {
       };
 
       setImprovements(data.improvedTicket);
-      setCodeInsights(data.codeInsights || null);
+      const freshCodeInsights = data.codeInsights || null;
+      setCodeInsights(freshCodeInsights);
       setCursorFallback(!!data.cursorFallback);
+      const freshMcpStats = data.mcpStats || null;
       if (data.mcpStats) setMcpStats(data.mcpStats);
 
       let resolvedAnnotations: Annotation[] = [];
@@ -440,6 +470,7 @@ export function TicketWorkspace() {
         setAnnotations(resolvedAnnotations);
       } catch { /* annotations are best-effort */ }
 
+      let freshRepoUsage: RepoUsageSummary | null = null;
       if (repoContextPrompt) {
         setRepoUsageLoading(true);
         try {
@@ -447,6 +478,7 @@ export function TicketWorkspace() {
             improvedTicket: result.improvedTicket,
             repoContextPrompt,
           }) as RepoUsageSummary;
+          freshRepoUsage = usageResult;
           setRepoUsage(usageResult);
         } catch { /* repo usage is best-effort */ }
         setRepoUsageLoading(false);
@@ -456,10 +488,14 @@ export function TicketWorkspace() {
       setViewingHistoryId(null);
 
       if (score) {
-        saveSnapshot(ticket, score, result.improvedTicket, resolvedAnnotations).catch(() => {});
+        saveSnapshot(ticket, score, result.improvedTicket, resolvedAnnotations, {
+          repoUsage: freshRepoUsage,
+          mcpStats: freshMcpStats,
+          codeInsights: freshCodeInsights,
+        }).catch(() => {});
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to improve ticket.');
+      setError(formatApiErrorMessage(err) || 'Failed to improve ticket.');
       setStep('scored');
     } finally {
       setImproveLoading(false);
@@ -490,7 +526,7 @@ export function TicketWorkspace() {
 
       updateHistoryEntry(ticket.key, { scoreAfter: newScore.overall });
     } catch (err: any) {
-      setError(err.message || 'Failed to re-score ticket.');
+      setError(formatApiErrorMessage(err) || 'Failed to re-score ticket.');
     } finally {
       setScoreLoading(false);
       setStatusMessage(null);
@@ -524,7 +560,11 @@ export function TicketWorkspace() {
       }
 
       setStatusMessage('Syncing changes to Jira...');
-      await api.jira.updateTicket(ticket.key, improvements);
+      const changedFields = diffChanges(ticket, improvements);
+      if (Object.keys(changedFields).length === 0) {
+        throw new Error('No changes to sync — the improved ticket matches the original.');
+      }
+      await api.jira.updateTicket(ticket.key, changedFields);
 
       const syncedAt = new Date().toISOString();
       updateHistoryEntry(ticket.key, { scoreAfter: finalScore?.overall ?? null, syncedAt });
@@ -551,7 +591,7 @@ export function TicketWorkspace() {
       setStep('fetch');
       resetWorkspace();
     } catch (err: any) {
-      setError(err.message || 'Failed to sync to Jira.');
+      setError(formatApiErrorMessage(err) || 'Failed to sync to Jira.');
     } finally {
       setSyncLoading(false);
       setStatusMessage(null);
@@ -562,7 +602,13 @@ export function TicketWorkspace() {
     setImprovements(updated);
   };
 
-  const saveSnapshot = async (t: Ticket, s: TicketScore, imp: TicketChanges, ann: Annotation[]) => {
+  const saveSnapshot = async (
+    t: Ticket,
+    s: TicketScore,
+    imp: TicketChanges,
+    ann: Annotation[],
+    overrides?: { repoUsage?: RepoUsageSummary | null; mcpStats?: McpUsageStats | null; codeInsights?: string | null },
+  ) => {
     const snapshot: HistorySnapshot = {
       id: `${t.key}-${Date.now()}`,
       ticketKey: t.key,
@@ -572,11 +618,11 @@ export function TicketWorkspace() {
       originalScore: originalScore ?? s.overall,
       improvements: imp,
       annotations: ann,
-      repoUsage,
-      mcpStats,
+      repoUsage: overrides?.repoUsage !== undefined ? overrides.repoUsage : repoUsage,
+      mcpStats: overrides?.mcpStats !== undefined ? overrides.mcpStats : mcpStats,
       referenceLinks: referenceLinks.filter((l) => l.fetched),
       repoUrl: connectedRepoUrl || null,
-      codeInsights,
+      codeInsights: overrides?.codeInsights !== undefined ? overrides.codeInsights : codeInsights,
       syncedAt: null,
       savedAt: new Date().toISOString(),
     };
@@ -616,7 +662,7 @@ export function TicketWorkspace() {
       }
       setShowHistory(false);
     } catch (err: any) {
-      setError(err.message || 'Failed to load history snapshot.');
+      setError(formatApiErrorMessage(err) || 'Failed to load history snapshot.');
     } finally {
       setStatusMessage(null);
     }
@@ -738,7 +784,12 @@ export function TicketWorkspace() {
               <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center">
                 <Wand2 className="w-4 h-4 text-white" />
               </div>
-              <h1 className="text-base font-bold text-gray-900">TicketCraft</h1>
+              <h1 className="text-base font-bold text-gray-900">
+                TicketCraft{' '}
+                <span className="text-xs font-normal text-gray-400">
+                  v0.{__COMMIT_COUNT__}
+                </span>
+              </h1>
             </div>
             {ticket && (
               <Badge variant="info">
@@ -1251,6 +1302,7 @@ export function TicketWorkspace() {
                   <div className="w-full lg:w-80 shrink-0">
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm h-[500px] lg:h-[600px] flex flex-col overflow-hidden sticky top-20">
                       <RefinementChat
+                        key={`${ticket.key}-${viewingHistoryId || 'live'}`}
                         ticket={ticket}
                         improvements={improvements}
                         repoContextPrompt={repoContextPrompt}

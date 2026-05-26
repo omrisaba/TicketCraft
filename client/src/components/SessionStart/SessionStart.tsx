@@ -4,7 +4,7 @@ import { Select } from '../ui/Select';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { useSession } from '../../context/SessionContext';
-import { api, setApiCredentials } from '../../services/apiClient';
+import { api, setApiCredentials, formatApiErrorMessage } from '../../services/apiClient';
 import { type GeminiModel, type AppConfig } from 'ticketcraft-shared';
 import { Shield, Zap, Loader2, KeyRound, FileUp, Download, CheckCircle2 } from 'lucide-react';
 
@@ -130,7 +130,7 @@ export function SessionStart() {
       setApiCredentials(creds);
       startSession(creds, result.jiraUser);
     } catch (err: any) {
-      setError(err.message || 'Failed to validate credentials.');
+      setError(formatApiErrorMessage(err) || 'Failed to validate credentials.');
     } finally {
       setLoading(false);
     }
@@ -154,7 +154,12 @@ export function SessionStart() {
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-600 text-white mb-2">
             <Zap className="w-6 h-6" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">TicketCraft</h1>
+          <h1 className="text-3xl font-bold text-gray-900">
+            TicketCraft{' '}
+            <span className="text-lg font-normal text-gray-400">
+              v0.{__COMMIT_COUNT__}
+            </span>
+          </h1>
           <p className="text-gray-500 mt-2">AI-powered Jira ticket quality improvement</p>
           {appConfig && (
             <p className="text-xs text-gray-400 mt-1">
@@ -368,24 +373,6 @@ export function SessionStart() {
                 className="text-sm font-medium text-indigo-600 hover:text-indigo-700 underline underline-offset-2"
               >
                 User Guide
-              </a>
-              <span className="text-xs text-gray-400"> · </span>
-              <a
-                href="/api/docs"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm font-medium text-indigo-600 hover:text-indigo-700 underline underline-offset-2"
-              >
-                REST API docs (Swagger)
-              </a>
-              <span className="text-xs text-gray-400"> · </span>
-              <a
-                href="/api/openapi.json"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-gray-600 hover:text-gray-800 underline underline-offset-2"
-              >
-                openapi.json
               </a>
             </p>
 
