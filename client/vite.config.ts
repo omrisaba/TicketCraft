@@ -9,11 +9,13 @@ const certPath = path.resolve(__dirname, '../server/certs/localhost.crt');
 const keyPath = path.resolve(__dirname, '../server/certs/localhost.key');
 const hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
 
-let commitCount = '?';
-try {
-  commitCount = execSync('git rev-list --count HEAD').toString().trim();
-} catch {
-  // git not available (e.g. Docker build without .git)
+let commitCount = process.env.COMMIT_COUNT || '';
+if (!commitCount) {
+  try {
+    commitCount = execSync('git rev-list --count HEAD').toString().trim();
+  } catch {
+    commitCount = '?';
+  }
 }
 
 export default defineConfig({

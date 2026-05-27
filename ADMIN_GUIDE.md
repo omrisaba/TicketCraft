@@ -61,7 +61,7 @@ The app will be available at:
 **Step 1.** Build the Docker image:
 
 ```
-docker build -t ticketcraft .
+docker build --build-arg COMMIT_COUNT=$(git rev-list --count HEAD) -t ticketcraft .
 ```
 
 **Step 2.** Run the container with required environment variables:

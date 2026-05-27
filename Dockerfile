@@ -1,5 +1,8 @@
 FROM node:20-alpine
 
+ARG COMMIT_COUNT
+ENV COMMIT_COUNT=${COMMIT_COUNT}
+
 RUN apk add --no-cache git
 
 WORKDIR /app
