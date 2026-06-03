@@ -985,7 +985,7 @@ export function TicketWorkspace() {
               {ticket.description && (
                 <p className="text-xs text-gray-500 line-clamp-3 leading-relaxed">{ticket.description}</p>
               )}
-              {(ticket.parent || ticket.subtasks.length > 0 || linkedTickets.length > 0) && (
+              {(ticket.parent || (ticket.subtasks?.length ?? 0) > 0 || linkedTickets.length > 0) && (
                 <button
                   onClick={() => setShowTicketMap(true)}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-sm text-blue-700 transition-colors"
@@ -993,9 +993,9 @@ export function TicketWorkspace() {
                   <Network className="w-4 h-4 shrink-0" />
                   <div className="flex-1 text-left text-xs">
                     {ticket.parent && <span>Parent: <strong>{ticket.parent.key}</strong></span>}
-                    {ticket.parent && (ticket.subtasks.length > 0 || linkedTickets.length > 0) ? ' · ' : ''}
-                    {ticket.subtasks.length > 0 && <span>{ticket.subtasks.length} subtask{ticket.subtasks.length > 1 ? 's' : ''}</span>}
-                    {ticket.subtasks.length > 0 && linkedTickets.length > 0 ? ' · ' : ''}
+                    {ticket.parent && ((ticket.subtasks?.length ?? 0) > 0 || linkedTickets.length > 0) ? ' · ' : ''}
+                    {(ticket.subtasks?.length ?? 0) > 0 && <span>{ticket.subtasks!.length} subtask{ticket.subtasks!.length > 1 ? 's' : ''}</span>}
+                    {(ticket.subtasks?.length ?? 0) > 0 && linkedTickets.length > 0 ? ' · ' : ''}
                     {linkedTickets.length > 0 && <span>{linkedTickets.length} linked</span>}
                   </div>
                   <span className="text-[10px] font-medium text-blue-500">Map</span>
@@ -1122,7 +1122,7 @@ export function TicketWorkspace() {
                     >
                       Re-evaluate
                     </Button>
-                    {(ticket.parent || ticket.subtasks.length > 0 || ticket.linkedTickets.length > 0) && (
+                    {(ticket.parent || (ticket.subtasks?.length ?? 0) > 0 || (ticket.linkedTickets?.length ?? 0) > 0) && (
                       <Button
                         variant="secondary"
                         icon={<Network className="w-4 h-4" />}
@@ -1238,7 +1238,7 @@ export function TicketWorkspace() {
                       Re-generate
                     </Button>
                     <ExportPanel ticket={ticket} improvements={improvements} score={score || undefined} />
-                    {(ticket.parent || ticket.subtasks.length > 0 || ticket.linkedTickets.length > 0) && (
+                    {(ticket.parent || (ticket.subtasks?.length ?? 0) > 0 || (ticket.linkedTickets?.length ?? 0) > 0) && (
                       <Button
                         variant="secondary"
                         icon={<Network className="w-4 h-4" />}

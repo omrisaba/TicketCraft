@@ -129,8 +129,9 @@ function buildGraph(ticket: Ticket): { nodes: Node[]; edges: Edge[] } {
   addNode(ticket.key, ticket.summary, ticket.status, ticket.issueType, CENTER_X, CENTER_Y, true);
 
   // Subtasks (below)
-  const subtaskStartX = CENTER_X - ((ticket.subtasks.length - 1) * H_GAP) / 2;
-  ticket.subtasks.forEach((st, i) => {
+  const subtasks = ticket.subtasks ?? [];
+  const subtaskStartX = CENTER_X - ((subtasks.length - 1) * H_GAP) / 2;
+  subtasks.forEach((st, i) => {
     const x = subtaskStartX + i * H_GAP;
     addNode(st.key, st.summary, st.status, st.issueType, x, CENTER_Y + V_GAP, false);
     edges.push({
@@ -145,7 +146,7 @@ function buildGraph(ticket: Ticket): { nodes: Node[]; edges: Edge[] } {
   });
 
   // Linked tickets (left and right sides)
-  const linked = ticket.linkedTickets;
+  const linked = ticket.linkedTickets ?? [];
   const leftLinks = linked.filter((_, i) => i % 2 === 0);
   const rightLinks = linked.filter((_, i) => i % 2 === 1);
 
@@ -199,8 +200,8 @@ export function TicketGraph({ ticket, onTicketClick }: Props) {
   );
 
   const hasRelationships = ticket.parent
-    || ticket.subtasks.length > 0
-    || ticket.linkedTickets.length > 0;
+    || (ticket.subtasks?.length ?? 0) > 0
+    || (ticket.linkedTickets?.length ?? 0) > 0;
 
   if (!hasRelationships) {
     return (
