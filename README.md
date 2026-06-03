@@ -25,7 +25,6 @@ AI-powered Jira ticket quality improvement tool. Score, improve, compose, and sy
 - **Session History** — Track all tickets improved in the current session, with server-side persistence
 - **Ticket Graph** — Interactive node diagram visualizing ticket relationships (parent, subtasks, linked issues)
 - **Admin Panel** — Settings management, server logs, and usage dashboard for admin users
-- **Swagger / OpenAPI** — Built-in interactive API documentation at `/api/docs`
 
 ## Security & Privacy
 
@@ -63,8 +62,6 @@ npm run dev
 
 The app will be available at `https://localhost:5173` with the API server at `https://localhost:3001`.
 
-API documentation (Swagger UI) is available at `https://localhost:3001/api/docs`.
-
 ### Admin Configuration (.env)
 
 These are set once by the admin and apply to all users:
@@ -73,7 +70,7 @@ These are set once by the admin and apply to all users:
 |----------|----------|-------------|
 | `GEMINI_API_KEY` | Yes | Google Gemini API key for all AI operations |
 | `JIRA_BASE_URL` | Yes | Jira instance URL (e.g., `https://yourcompany.atlassian.net`) |
-| `GEMINI_DEFAULT_MODEL` | No | Default model, users can override (default: `gemini-3.1-pro-preview`) |
+| `GEMINI_DEFAULT_MODEL` | No | Default model, users can override (default: `gemini-3.5-flash`) |
 | `ADMIN_EMAILS` | No | Comma-separated emails allowed to access admin panel |
 | `SESSION_TIMEOUT_MS` | No | Inactivity timeout in ms (default: `1800000` / 30 min) |
 | `PORT` | No | HTTPS listen port (default: `3001`) |
@@ -107,12 +104,11 @@ Credentials can also be loaded from a local JSON file (read entirely in the brow
 | Frontend | React 19 + TypeScript + Vite |
 | UI | Tailwind CSS 4 + Lucide Icons |
 | Backend | Node.js + Express 5 |
-| AI | Google Gemini API (3.0/3.1 models) |
+| AI | Google Gemini API (3.1/3.5 models) |
 | AI (optional) | Cursor SDK for repo-aware agent analysis |
 | Repo Context | MCP (Model Context Protocol) for GitHub/GitLab |
 | Jira | Jira REST API v3 |
 | Security | Helmet.js, CORS, rate-limiting, HTTPS |
-| API Docs | Swagger UI / OpenAPI 3.0 |
 
 ## Project Structure
 
@@ -164,7 +160,6 @@ TicketCraft/
 │       │   ├── templates/       # TemplateRepository
 │       │   └── interfaces/      # TypeScript interfaces
 │       ├── middleware/      # Security, auth, validation, error handling
-│       ├── openapi/         # Swagger/OpenAPI spec & UI
 │       └── config/          # Environment configuration
 ├── shared/                  # Shared TypeScript types
 │   └── types/               # Ticket, Score, Session, Admin, Automation,
@@ -276,13 +271,12 @@ TicketCraft/
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/health` | Health check |
-| GET | `/api/docs` | Swagger UI (interactive API documentation) |
 
 ## Available Gemini Models
 
-- **Gemini 3.1 Pro** (`gemini-3.1-pro-preview`) — highest quality, default
-- **Gemini 3.1 Flash-Lite** (`gemini-3.1-flash-lite-preview`) — faster, lower cost
-- **Gemini 3.0 Flash** (`gemini-3-flash-preview`) — previous generation flash model
+- **Gemini 3.5 Flash** (`gemini-3.5-flash`) — fast and capable, default
+- **Gemini 3.1 Pro** (`gemini-3.1-pro-preview`) — highest quality
+- **Gemini 3.1 Flash-Lite** (`gemini-3.1-flash-lite`) — faster, lower cost
 
 ## License
 
