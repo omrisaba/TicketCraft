@@ -75,7 +75,7 @@ export class McpClient {
     let json: any;
 
     if (contentType.includes('text/event-stream')) {
-      json = await this.parseSSE(await resp.text());
+      json = await this.parseSSE(await resp.text(), reqBody.id as string);
     } else {
       json = await resp.json();
     }
@@ -88,35 +88,46 @@ export class McpClient {
   }
 
   /**
-   * Parse an SSE stream body and extract the last JSON-RPC message
-   * from `data:` lines in `event: message` blocks.
+   * Parse an SSE stream body and extract the JSON-RPC message matching
+   * the given request `id` from `data:` lines in `event: message` blocks.
+   * Falls back to the last parseable JSON if no id match is found.
    */
-  private async parseSSE(text: string): Promise<any> {
+  private async parseSSE(text: string, requestId?: string): Promise<any> {
     const events = text.split(/\r?\n\r?\n/);
+    let matchedJson: any = null;
     let lastJson: any = null;
 
     for (const event of events) {
       const dataLines: string[] = [];
+      let eventType = 'message';
       for (const line of event.split(/\r?\n/)) {
-        if (line.startsWith('data:')) {
+        if (line.startsWith('event:')) {
+          eventType = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
           dataLines.push(line.slice(5).trimStart());
         }
       }
+      if (eventType !== 'message') continue;
       if (dataLines.length === 0) continue;
       const payload = dataLines.join('\n').trim();
       if (!payload || payload === '[DONE]') continue;
       try {
-        lastJson = JSON.parse(payload);
+        const parsed = JSON.parse(payload);
+        lastJson = parsed;
+        if (requestId && parsed.id === requestId) {
+          matchedJson = parsed;
+        }
       } catch {
         // Keep scanning; some events may not be JSON-RPC payloads.
       }
     }
 
-    if (!lastJson) {
+    const result = matchedJson || lastJson;
+    if (!result) {
       throw new Error('SSE response contained no data lines');
     }
 
-    return lastJson;
+    return result;
   }
 
   async initialize(): Promise<void> {

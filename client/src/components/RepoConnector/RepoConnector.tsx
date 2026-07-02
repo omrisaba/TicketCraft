@@ -6,7 +6,7 @@ import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import type { RepoContext } from 'ticketcraft-shared';
-import { GitBranch, Link2, X, Check } from 'lucide-react';
+import { GitBranch, Link2, X, Check, RefreshCw } from 'lucide-react';
 
 export function RepoConnector() {
   const { repoContext, setRepoContext } = useSession();
@@ -40,6 +40,21 @@ export function RepoConnector() {
       api.automation.saveRepoUrl(url).catch(() => {});
     } catch (err: any) {
       setError(formatApiErrorMessage(err) || 'Failed to fetch repository.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (!repoContext || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const url = `https://${repoContext.info.provider === 'github' ? 'github.com' : 'gitlab.com'}/${repoContext.info.owner}/${repoContext.info.repo}`;
+      const ctx = await api.repo.fetchContext(url) as RepoContext;
+      setRepoContext(ctx);
+    } catch (err: any) {
+      setError(formatApiErrorMessage(err) || 'Failed to refresh repository context.');
     } finally {
       setLoading(false);
     }
@@ -84,6 +99,16 @@ export function RepoConnector() {
             <Button
               variant="ghost"
               size="sm"
+              icon={<RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />}
+              onClick={handleRefresh}
+              disabled={loading}
+              title="Refresh repository context"
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               icon={<X className="w-4 h-4" />}
               onClick={() => { setRepoContext(null); api.automation.saveRepoUrl(null).catch(() => {}); }}
             >
@@ -91,6 +116,9 @@ export function RepoConnector() {
             </Button>
           </div>
         </div>
+        {error && (
+          <p role="alert" className="text-xs text-red-600 mt-2">{error}</p>
+        )}
       </Card>
     );
   }

@@ -52,18 +52,30 @@ export class AIController {
    * dropping the connection during long-running Cursor agent calls.
    * Call stop() before sending the real JSON response.
    */
-  private startKeepAlive(res: Response): { stop: () => void } {
+  private startKeepAlive(req: Request, res: Response): { stop: () => void; aborted: boolean } {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
+    const state = { aborted: false };
+
     const interval = setInterval(() => {
       if (!res.writableEnded) res.write(' ');
     }, 15_000);
 
+    const onClose = () => {
+      state.aborted = true;
+      clearInterval(interval);
+    };
+    req.on('close', onClose);
+
     return {
-      stop: () => clearInterval(interval),
+      stop: () => {
+        clearInterval(interval);
+        req.off('close', onClose);
+      },
+      get aborted() { return state.aborted; },
     };
   }
 
@@ -150,7 +162,7 @@ export class AIController {
       };
 
       if (useCursor) {
-        const keepAlive = this.startKeepAlive(res);
+        const keepAlive = this.startKeepAlive(req, res);
         try {
           const result = await this.improveWithCursor(req, ticket, repoUrl, improveBase);
           keepAlive.stop();
@@ -159,10 +171,13 @@ export class AIController {
             .catch((e) => console.warn('[USAGE] improve record failed:', (e as Error).message));
         } catch (err: any) {
           keepAlive.stop();
+          if (res.writableEnded) return;
+          const status = err instanceof AppError ? err.statusCode : 502;
           const msg = err?.message || 'Cursor improve failed';
           const code = err?.code || 'CURSOR_ERROR';
-          res.status(502);
-          res.end(JSON.stringify({ success: false, error: { code, message: msg } }));
+          const details = err instanceof AppError ? err.details : undefined;
+          res.status(status);
+          res.end(JSON.stringify({ success: false, error: { code, message: msg, details } }));
         }
         return;
       }
@@ -192,6 +207,7 @@ export class AIController {
       linkedTickets?: Ticket[];
       referenceContent?: string;
       skillsMarkdown?: string;
+      detailLevel?: DetailLevel;
     },
   ) {
     const admin = await AdminStore.load();
@@ -208,11 +224,14 @@ export class AIController {
       throw new AppError(400, 'CURSOR_NO_REPO', 'Cursor requires a connected repository. Please connect a repo first.');
     }
 
+    const repoContextPrompt = req.body.repoContextPrompt as string | undefined;
+    const { prompt: enrichedPrompt, mcpStats } = await this.enrichWithMcpFromReq(req, ticket, repoUrl, repoContextPrompt);
+
     if (cursorActiveCount >= admin.cursorMaxConcurrent) {
       const { geminiApiKey, geminiModel, geminiTemperature } = creds;
       const ai = new GeminiAdapter(geminiApiKey, geminiModel, geminiTemperature);
-      const result = await ai.improveTicket(ticket, options);
-      return { ...result, cursorFallback: true, codeInsights: null };
+      const result = await ai.improveTicket(ticket, { ...options, repoContextPrompt: enrichedPrompt });
+      return { ...result, cursorFallback: true, codeInsights: null, mcpStats };
     }
 
     cursorActiveCount++;
@@ -220,13 +239,16 @@ export class AIController {
       const parsed = RepoService.parseRepoUrl(repoUrl);
       const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
 
-      const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
+      const { dir: repoDir, stale: repoStale } = await RepoCloneStore.ensureClone(repoUrl, token);
       const cursor = new CursorAdapter(creds.cursorApiKey!, admin.cursorModel, repoDir);
       const gemini = this.getAI(req);
 
       const analysis = await cursor.exploreForImprove(ticket, options);
-      const result = await gemini.formatImproveResult(ticket, analysis, options);
-      return { ...result, cursorFallback: false };
+      const fullAnalysis = enrichedPrompt
+        ? analysis + '\n\n## Additional Repository Context (MCP)\n\n' + enrichedPrompt
+        : analysis;
+      const result = await gemini.formatImproveResult(ticket, fullAnalysis, options);
+      return { ...result, cursorFallback: false, mcpStats, repoStale };
     } finally {
       cursorActiveCount--;
     }
@@ -249,24 +271,6 @@ export class AIController {
         detailLevel,
       };
 
-      if (useCursor) {
-        const keepAlive = this.startKeepAlive(res);
-        try {
-          const result = await this.composeWithCursor(req, freeText, repoUrl, composeOpts);
-          keepAlive.stop();
-          res.end(JSON.stringify({ success: true, data: result }));
-          usageTracker.record(getCredentials(req).jiraEmail, 'compose')
-            .catch((e) => console.warn('[USAGE] compose record failed:', (e as Error).message));
-        } catch (err: any) {
-          keepAlive.stop();
-          const msg = err?.message || 'Cursor compose failed';
-          const code = err?.code || 'CURSOR_ERROR';
-          res.status(502);
-          res.end(JSON.stringify({ success: false, error: { code, message: msg } }));
-        }
-        return;
-      }
-
       const syntheticTicket: Ticket = {
         id: '', key: '', summary: freeText.slice(0, 200), description: freeText,
         status: 'New', priority: null, assignee: null, reporter: null, reporterEmail: null,
@@ -274,6 +278,28 @@ export class AIController {
         acceptanceCriteria: null, parent: null, subtasks: [], linkedTickets: [],
         attachments: [], comments: [], created: '', updated: '', rawAdf: null,
       };
+
+      if (useCursor) {
+        const keepAlive = this.startKeepAlive(req, res);
+        try {
+          const result = await this.composeWithCursor(req, freeText, repoUrl, syntheticTicket, composeOpts);
+          keepAlive.stop();
+          res.end(JSON.stringify({ success: true, data: result }));
+          usageTracker.record(getCredentials(req).jiraEmail, 'compose')
+            .catch((e) => console.warn('[USAGE] compose record failed:', (e as Error).message));
+        } catch (err: any) {
+          keepAlive.stop();
+          if (res.writableEnded) return;
+          const status = err instanceof AppError ? err.statusCode : 502;
+          const msg = err?.message || 'Cursor compose failed';
+          const code = err?.code || 'CURSOR_ERROR';
+          const details = err instanceof AppError ? err.details : undefined;
+          res.status(status);
+          res.end(JSON.stringify({ success: false, error: { code, message: msg, details } }));
+        }
+        return;
+      }
+
       const { prompt: enrichedPrompt, mcpStats } = await this.enrichWithMcpFromReq(req, syntheticTicket, repoUrl, repoContextPrompt);
       const ai = this.getAI(req);
       const result = await ai.composeTicket(freeText, {
@@ -293,6 +319,7 @@ export class AIController {
     req: Request,
     freeText: string,
     repoUrl: string | undefined,
+    syntheticTicket: Ticket,
     options: {
       issueType?: string;
       templateType?: TicketTemplateType;
@@ -312,23 +339,30 @@ export class AIController {
     if (!repoUrl) {
       throw new AppError(400, 'CURSOR_NO_REPO', 'Cursor requires a connected repository.');
     }
+
+    const repoContextPrompt = req.body.repoContextPrompt as string | undefined;
+    const { prompt: enrichedPrompt, mcpStats } = await this.enrichWithMcpFromReq(req, syntheticTicket, repoUrl, repoContextPrompt);
+
     if (cursorActiveCount >= admin.cursorMaxConcurrent) {
       const ai = this.getAI(req);
-      const result = await ai.composeTicket(freeText, options);
-      return { ...result, cursorFallback: true, codeInsights: null };
+      const result = await ai.composeTicket(freeText, { ...options, repoContextPrompt: enrichedPrompt });
+      return { ...result, cursorFallback: true, codeInsights: null, mcpStats };
     }
 
     cursorActiveCount++;
     try {
       const parsed = RepoService.parseRepoUrl(repoUrl);
       const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
-      const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
+      const { dir: repoDir, stale: repoStale } = await RepoCloneStore.ensureClone(repoUrl, token);
       const cursor = new CursorAdapter(creds.cursorApiKey!, admin.cursorModel, repoDir);
       const gemini = this.getAI(req);
 
       const analysis = await cursor.exploreForCompose(freeText, options);
-      const result = await gemini.formatComposeResult(freeText, analysis, options);
-      return { ...result, cursorFallback: false };
+      const fullAnalysis = enrichedPrompt
+        ? analysis + '\n\n## Additional Repository Context (MCP)\n\n' + enrichedPrompt
+        : analysis;
+      const result = await gemini.formatComposeResult(freeText, fullAnalysis, options);
+      return { ...result, cursorFallback: false, mcpStats, repoStale };
     } finally {
       cursorActiveCount--;
     }
@@ -354,22 +388,6 @@ export class AIController {
         detailLevel,
       };
 
-      if (useCursor) {
-        const keepAlive = this.startKeepAlive(res);
-        try {
-          const result = await this.breakdownWithCursor(req, ticket, repoUrl, breakdownOpts);
-          keepAlive.stop();
-          res.end(JSON.stringify({ success: true, data: result }));
-        } catch (err: any) {
-          keepAlive.stop();
-          const msg = err?.message || 'Cursor breakdown failed';
-          const code = err?.code || 'CURSOR_ERROR';
-          res.status(502);
-          res.end(JSON.stringify({ success: false, error: { code, message: msg } }));
-        }
-        return;
-      }
-
       const syntheticTicket: Ticket = {
         id: '', key: '', summary: ticket.summary || '', description: ticket.description || '',
         status: 'New', priority: null, assignee: null, reporter: null, reporterEmail: null,
@@ -378,6 +396,26 @@ export class AIController {
         parent: null, subtasks: [], linkedTickets: [], attachments: [], comments: [],
         created: '', updated: '', rawAdf: null,
       };
+
+      if (useCursor) {
+        const keepAlive = this.startKeepAlive(req, res);
+        try {
+          const result = await this.breakdownWithCursor(req, ticket, repoUrl, syntheticTicket, breakdownOpts);
+          keepAlive.stop();
+          res.end(JSON.stringify({ success: true, data: result }));
+        } catch (err: any) {
+          keepAlive.stop();
+          if (res.writableEnded) return;
+          const status = err instanceof AppError ? err.statusCode : 502;
+          const msg = err?.message || 'Cursor breakdown failed';
+          const code = err?.code || 'CURSOR_ERROR';
+          const details = err instanceof AppError ? err.details : undefined;
+          res.status(status);
+          res.end(JSON.stringify({ success: false, error: { code, message: msg, details } }));
+        }
+        return;
+      }
+
       const { prompt: enrichedPrompt, mcpStats } = await this.enrichWithMcpFromReq(req, syntheticTicket, repoUrl, repoContextPrompt);
       const ai = this.getAI(req);
       const result = await ai.breakdownTicket(ticket as TicketChanges, {
@@ -395,6 +433,7 @@ export class AIController {
     req: Request,
     ticket: TicketChanges,
     repoUrl: string | undefined,
+    syntheticTicket: Ticket,
     options: {
       issueType?: string;
       subtaskType?: string;
@@ -415,21 +454,30 @@ export class AIController {
     if (!repoUrl) {
       throw new AppError(400, 'CURSOR_NO_REPO', 'Cursor requires a connected repository.');
     }
+
+    const repoContextPrompt = req.body.repoContextPrompt as string | undefined;
+    const { prompt: enrichedPrompt, mcpStats } = await this.enrichWithMcpFromReq(req, syntheticTicket, repoUrl, repoContextPrompt);
+
     if (cursorActiveCount >= admin.cursorMaxConcurrent) {
       const ai = this.getAI(req);
-      return ai.breakdownTicket(ticket, options);
+      const result = await ai.breakdownTicket(ticket, { ...options, repoContextPrompt: enrichedPrompt });
+      return { ...result, cursorFallback: true, mcpStats };
     }
 
     cursorActiveCount++;
     try {
       const parsed = RepoService.parseRepoUrl(repoUrl);
       const token = parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
-      const repoDir = await RepoCloneStore.ensureClone(repoUrl, token);
+      const { dir: repoDir, stale: repoStale } = await RepoCloneStore.ensureClone(repoUrl, token);
       const cursor = new CursorAdapter(creds.cursorApiKey!, admin.cursorModel, repoDir);
       const gemini = this.getAI(req);
 
       const analysis = await cursor.exploreForBreakdown(ticket, options);
-      return await gemini.formatBreakdownResult(ticket, analysis, options);
+      const fullAnalysis = enrichedPrompt
+        ? analysis + '\n\n## Additional Repository Context (MCP)\n\n' + enrichedPrompt
+        : analysis;
+      const result = await gemini.formatBreakdownResult(ticket, fullAnalysis, options);
+      return { ...result, mcpStats, repoStale };
     } finally {
       cursorActiveCount--;
     }

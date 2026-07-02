@@ -100,6 +100,8 @@ export class CursorAdapter {
     return this.runAgent(prompt, 'cursorBreakdown');
   }
 
+  private static readonly AGENT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
   private async runAgent(prompt: string, operationPrefix: string): Promise<string> {
     const maxAttempts = 2;
     const start = Date.now();
@@ -113,7 +115,12 @@ export class CursorAdapter {
 
       try {
         const run = await agent.send(prompt);
-        const result = await run.wait();
+        const result = await Promise.race([
+          run.wait(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Cursor agent timed out after 5 minutes')), CursorAdapter.AGENT_TIMEOUT_MS),
+          ),
+        ]);
         const duration = Date.now() - start;
 
         if (result.status !== 'finished') {

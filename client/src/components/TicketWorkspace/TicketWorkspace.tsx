@@ -164,6 +164,7 @@ export function TicketWorkspace() {
   const [showUserSkills, setShowUserSkills] = useState(false);
   const draftChecked = useRef(false);
   const fetchIdRef = useRef(0);
+  const aiAbortRef = useRef<AbortController | null>(null);
   /** For expanding custom skills once when entering Review with content */
   const priorStepRef = useRef<WorkspaceStep>('fetch');
 
@@ -176,6 +177,10 @@ export function TicketWorkspace() {
       setShowUserSkills(true);
     }
   }, [step, userSkillsMarkdown]);
+
+  useEffect(() => {
+    return () => { aiAbortRef.current?.abort(); };
+  }, []);
 
   useEffect(() => {
     if (draftChecked.current) return;
@@ -329,9 +334,10 @@ export function TicketWorkspace() {
     setStatusMessage(null);
   };
 
-  const handleFetch = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!ticketKey.trim()) return;
+  const handleFetch = async (e?: FormEvent | string) => {
+    if (typeof e === 'object') e?.preventDefault();
+    const keyToFetch = typeof e === 'string' ? e : ticketKey;
+    if (!keyToFetch.trim()) return;
     const currentFetchId = ++fetchIdRef.current;
     setError(null);
     setFetchLoading(true);
@@ -341,7 +347,7 @@ export function TicketWorkspace() {
 
     try {
       setStatusMessage('Fetching ticket from Jira...');
-      const ticketData = await api.jira.getTicket(ticketKey.trim().toUpperCase()) as Ticket;
+      const ticketData = await api.jira.getTicket(keyToFetch.trim().toUpperCase()) as Ticket;
       if (fetchIdRef.current !== currentFetchId) return;
       setTicket(ticketData);
       setTicketKey(ticketData.key);
@@ -352,8 +358,9 @@ export function TicketWorkspace() {
         const linkedRefs = ticketData.linkedTickets || [];
         if (linkedRefs.length > 0) {
           setStatusMessage('Loading linked tickets...');
+          const capped = linkedRefs.slice(0, 5);
           const results = await Promise.allSettled(
-            linkedRefs.slice(0, 5).map((lt) =>
+            capped.map((lt) =>
               api.jira.getTicket(lt.key) as Promise<Ticket>,
             ),
           );
@@ -361,27 +368,40 @@ export function TicketWorkspace() {
             .filter((r): r is PromiseFulfilledResult<Ticket> => r.status === 'fulfilled')
             .map((r) => r.value);
           setLinkedTickets(fetchedLinked);
+          const failedCount = results.filter((r) => r.status === 'rejected').length;
+          const skippedCount = linkedRefs.length - capped.length;
+          const warnings: string[] = [];
+          if (failedCount > 0) warnings.push(`${failedCount} linked ticket(s) couldn't be loaded (likely permission restricted)`);
+          if (skippedCount > 0) warnings.push(`${skippedCount} additional linked ticket(s) were skipped (max 5 loaded)`);
+          if (warnings.length > 0) {
+            setError(warnings.join('. ') + '. AI analysis may have incomplete context.');
+          }
         }
       } catch { /* linked tickets are optional */ }
 
       if (fetchIdRef.current !== currentFetchId) return;
       setScoreLoading(true);
       setStatusMessage('AI is analyzing ticket quality...');
-      const referenceContent = formatReferenceContent(savedLinks);
-      const scoreResult = await api.ai.score({ ticket: ticketData, linkedTickets: fetchedLinked.length > 0 ? fetchedLinked : undefined, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl }) as TicketScore;
-      if (fetchIdRef.current !== currentFetchId) return;
-      setScore(scoreResult);
-      setOriginalScore(scoreResult.overall);
-      setStep('scored');
+      try {
+        const referenceContent = formatReferenceContent(savedLinks);
+        const scoreResult = await api.ai.score({ ticket: ticketData, linkedTickets: fetchedLinked.length > 0 ? fetchedLinked : undefined, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl, templateType: selectedTemplate ?? undefined }) as TicketScore;
+        if (fetchIdRef.current !== currentFetchId) return;
+        setScore(scoreResult);
+        setOriginalScore(scoreResult.overall);
 
-      addHistoryEntry({
-        ticketKey: ticketData.key,
-        ticketSummary: ticketData.summary,
-        scoreBefore: scoreResult.overall,
-        scoreAfter: null,
-        syncedAt: null,
-        timestamp: new Date().toISOString(),
-      });
+        addHistoryEntry({
+          ticketKey: ticketData.key,
+          ticketSummary: ticketData.summary,
+          scoreBefore: scoreResult.overall,
+          scoreAfter: null,
+          syncedAt: null,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (scoreErr: any) {
+        setError(formatApiErrorMessage(scoreErr) || 'Scoring failed — you can retry with "Re-evaluate".');
+      }
+      if (fetchIdRef.current !== currentFetchId) return;
+      setStep('scored');
 
     } catch (err: any) {
       setError(formatApiErrorMessage(err) || 'Failed to fetch ticket.');
@@ -407,6 +427,7 @@ export function TicketWorkspace() {
         repoContextPrompt,
         referenceContent,
         repoUrl: connectedRepoUrl,
+        templateType: selectedTemplate ?? undefined,
       }) as { questions: GuidingQuestion[] };
       setQuestions(qResult.questions || []);
     } catch (err: any) {
@@ -425,6 +446,12 @@ export function TicketWorkspace() {
       );
       return;
     }
+    aiAbortRef.current?.abort();
+    const controller = new AbortController();
+    aiAbortRef.current = controller;
+    const mergedAnswers = answersInput
+      ? { ...userAnswers, ...answersInput }
+      : (Object.keys(userAnswers).length > 0 ? userAnswers : undefined);
     if (answersInput) setUserAnswers((prev) => ({ ...prev, ...answersInput }));
     setError(null);
     setImproveLoading(true);
@@ -437,7 +464,7 @@ export function TicketWorkspace() {
       const result = await api.ai.improve({
         ticket,
         templateType: selectedTemplate ?? undefined,
-        userAnswers: answersInput,
+        userAnswers: mergedAnswers,
         linkedTickets: linkedTickets.length > 0 ? linkedTickets : undefined,
         detailLevel,
         repoContextPrompt,
@@ -445,7 +472,7 @@ export function TicketWorkspace() {
         repoUrl: connectedRepoUrl,
         useCursor,
         skillsMarkdown: trimmedSkills === '' ? undefined : trimmedSkills,
-      });
+      }, controller.signal);
       const data = result as ImproveResponse & {
         codeInsights?: string | null;
         cursorFallback?: boolean;
@@ -495,6 +522,7 @@ export function TicketWorkspace() {
         }).catch(() => {});
       }
     } catch (err: any) {
+      if (err.name === 'AbortError' || controller.signal.aborted) return;
       setError(formatApiErrorMessage(err) || 'Failed to improve ticket.');
       setStep('scored');
     } finally {
@@ -504,24 +532,26 @@ export function TicketWorkspace() {
   };
 
   const handleRescore = async () => {
-    if (!ticket || !improvements) return;
+    if (!ticket) return;
     setScoreLoading(true);
     setError(null);
 
     try {
       setStatusMessage('Re-evaluating ticket quality...');
-      const updatedTicket: Ticket = {
-        ...ticket,
-        summary: improvements.summary || ticket.summary,
-        description: improvements.description || ticket.description,
-        acceptanceCriteria: improvements.acceptanceCriteria || ticket.acceptanceCriteria,
-        labels: improvements.labels || ticket.labels,
-        storyPoints: improvements.storyPoints ?? ticket.storyPoints,
-      };
+      const ticketToScore: Ticket = improvements
+        ? {
+            ...ticket,
+            summary: improvements.summary || ticket.summary,
+            description: improvements.description || ticket.description,
+            acceptanceCriteria: improvements.acceptanceCriteria || ticket.acceptanceCriteria,
+            labels: improvements.labels || ticket.labels,
+            storyPoints: improvements.storyPoints ?? ticket.storyPoints,
+          }
+        : ticket;
 
       setPreviousScore(score);
       const referenceContent = formatReferenceContent();
-      const newScore = await api.ai.score({ ticket: updatedTicket, linkedTickets: linkedTickets.length > 0 ? linkedTickets : undefined, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl }) as TicketScore;
+      const newScore = await api.ai.score({ ticket: ticketToScore, linkedTickets: linkedTickets.length > 0 ? linkedTickets : undefined, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl, templateType: selectedTemplate ?? undefined }) as TicketScore;
       setScore(newScore);
 
       updateHistoryEntry(ticket.key, { scoreAfter: newScore.overall });
@@ -553,7 +583,7 @@ export function TicketWorkspace() {
         };
         const referenceContent = formatReferenceContent();
         finalScore = await api.ai.score({
-          ticket: updatedTicket, linkedTickets: linkedTickets.length > 0 ? linkedTickets : undefined, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl,
+          ticket: updatedTicket, linkedTickets: linkedTickets.length > 0 ? linkedTickets : undefined, repoContextPrompt, referenceContent, repoUrl: connectedRepoUrl, templateType: selectedTemplate ?? undefined,
         }) as TicketScore;
         setPreviousScore(score);
         setScore(finalScore);
@@ -564,7 +594,7 @@ export function TicketWorkspace() {
       if (Object.keys(changedFields).length === 0) {
         throw new Error('No changes to sync — the improved ticket matches the original.');
       }
-      await api.jira.updateTicket(ticket.key, changedFields);
+      await api.jira.updateTicket(ticket.key, { ...changedFields, expectedUpdated: ticket.updated });
 
       const syncedAt = new Date().toISOString();
       updateHistoryEntry(ticket.key, { scoreAfter: finalScore?.overall ?? null, syncedAt });
@@ -599,7 +629,17 @@ export function TicketWorkspace() {
   };
 
   const handleRefinementUpdate = (updated: TicketChanges) => {
-    setImprovements(updated);
+    setImprovements((prev) => {
+      if (!prev) return updated;
+      return {
+        ...prev,
+        ...(updated.summary !== undefined ? { summary: updated.summary } : {}),
+        ...(updated.description !== undefined ? { description: updated.description } : {}),
+        ...(updated.acceptanceCriteria !== undefined ? { acceptanceCriteria: updated.acceptanceCriteria } : {}),
+        ...(updated.labels !== undefined ? { labels: updated.labels } : {}),
+        ...(updated.storyPoints !== undefined ? { storyPoints: updated.storyPoints } : {}),
+      };
+    });
   };
 
   const saveSnapshot = async (
@@ -1210,6 +1250,7 @@ export function TicketWorkspace() {
                     <Button
                       icon={<Upload className="w-4 h-4" />}
                       loading={syncLoading}
+                      disabled={improveLoading}
                       onClick={handleSync}
                     >
                       Sync to Jira
@@ -1232,7 +1273,7 @@ export function TicketWorkspace() {
                       variant="secondary"
                       icon={<Sparkles className="w-4 h-4" />}
                       loading={improveLoading}
-                      disabled={skillsOverLimit}
+                      disabled={skillsOverLimit || syncLoading}
                       onClick={() => handleImprove()}
                     >
                       Re-generate
@@ -1307,6 +1348,8 @@ export function TicketWorkspace() {
                         improvements={improvements}
                         repoContextPrompt={repoContextPrompt}
                         referenceContent={formatReferenceContent()}
+                        repoUrl={connectedRepoUrl}
+                        skillsMarkdown={userSkillsMarkdown.trim() || undefined}
                         onUpdate={handleRefinementUpdate}
                       />
                     </div>
@@ -1367,8 +1410,7 @@ export function TicketWorkspace() {
                 onTicketClick={(key) => {
                   setShowTicketMap(false);
                   setTicketKey(key);
-                  resetWorkspace();
-                  setTicketKey(key);
+                  handleFetch(key);
                 }}
               />
             </div>

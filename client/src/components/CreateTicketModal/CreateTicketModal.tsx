@@ -1,9 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from '../ui/Button';
 import { Select } from '../ui/Select';
 import { Input } from '../ui/Input';
 import { api, formatApiErrorMessage } from '../../services/apiClient';
-import type { Ticket, TicketChanges } from 'ticketcraft-shared';
+import type { Ticket, TicketChanges, JiraIssueType } from 'ticketcraft-shared';
 import { X, ExternalLink, Plus, Link2, GitBranch } from 'lucide-react';
 
 type CreationMode = 'standalone' | 'linked' | 'subtask';
@@ -24,7 +24,7 @@ const CREATION_MODES: { value: CreationMode; label: string; description: string;
   { value: 'standalone', label: 'Standalone', description: 'Creates an independent ticket with no link', icon: Plus },
 ];
 
-const ISSUE_TYPES = [
+const FALLBACK_ISSUE_TYPES = [
   { value: 'Story', label: 'Story' },
   { value: 'Task', label: 'Task' },
   { value: 'Bug', label: 'Bug' },
@@ -40,6 +40,22 @@ export function CreateTicketModal({
   onClose,
   onSuccess,
 }: CreateTicketModalProps) {
+  const [dynamicIssueTypes, setDynamicIssueTypes] = useState<{ value: string; label: string }[] | null>(null);
+  const [subtaskTypeName, setSubtaskTypeName] = useState('Sub-task');
+  useEffect(() => {
+    api.jira.getIssueTypes(projectKey)
+      .then((types: JiraIssueType[]) => {
+        const nonSubtask = types.filter((t) => !t.subtask);
+        if (nonSubtask.length > 0) {
+          setDynamicIssueTypes(nonSubtask.map((t) => ({ value: t.name, label: t.name })));
+        }
+        const sub = types.find((t) => t.subtask);
+        if (sub) setSubtaskTypeName(sub.name);
+      })
+      .catch(() => {});
+  }, [projectKey]);
+
+  const issueTypeOptions = dynamicIssueTypes || FALLBACK_ISSUE_TYPES;
   const merged = useMemo<TicketChanges>(() => ({
     summary: improvements.summary || originalTicket.summary,
     description: improvements.description ?? originalTicket.description ?? undefined,
@@ -50,14 +66,14 @@ export function CreateTicketModal({
 
   const [mode, setMode] = useState<CreationMode>('linked');
   const [issueType, setIssueType] = useState(
-    mode === 'subtask' ? 'Sub-task' : originalIssueType || 'Story',
+    mode === 'subtask' ? subtaskTypeName : originalIssueType || 'Story',
   );
   const [summary, setSummary] = useState(merged.summary || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdKey, setCreatedKey] = useState<string | null>(null);
 
-  const effectiveIssueType = mode === 'subtask' ? 'Sub-task' : issueType;
+  const effectiveIssueType = mode === 'subtask' ? subtaskTypeName : issueType;
 
   const handleCreate = async () => {
     if (!summary.trim()) {
@@ -140,8 +156,8 @@ export function CreateTicketModal({
                       type="button"
                       onClick={() => {
                         setMode(m.value);
-                        if (m.value === 'subtask') setIssueType('Sub-task');
-                        else if (issueType === 'Sub-task') setIssueType(originalIssueType || 'Story');
+                        if (m.value === 'subtask') setIssueType(subtaskTypeName);
+                        else if (issueType === subtaskTypeName) setIssueType(originalIssueType || 'Story');
                       }}
                       className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 text-sm transition-all cursor-pointer ${
                         selected
@@ -166,7 +182,7 @@ export function CreateTicketModal({
                 label="Issue type"
                 value={issueType}
                 onChange={(e) => setIssueType(e.target.value)}
-                options={ISSUE_TYPES}
+                options={issueTypeOptions}
               />
             )}
 

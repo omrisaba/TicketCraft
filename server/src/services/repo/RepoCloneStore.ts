@@ -5,11 +5,17 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { RepoService } from './RepoService.js';
+import { AppError } from '../../middleware/errorHandler.js';
 
 const exec = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPOS_DIR = path.resolve(__dirname, '../../../data/repos');
 const STALE_MS = 10 * 60 * 1000; // pull if older than 10 min
+
+export interface CloneResult {
+  dir: string;
+  stale: boolean;
+}
 
 interface CloneEntry {
   dir: string;
@@ -17,12 +23,13 @@ interface CloneEntry {
 }
 
 const cache = new Map<string, CloneEntry>();
+const inFlight = new Map<string, Promise<CloneResult>>();
 
 export class RepoCloneStore {
   static async ensureClone(
     repoUrl: string,
     token?: string,
-  ): Promise<string> {
+  ): Promise<CloneResult> {
     const { provider, owner, repo } = RepoService.parseRepoUrl(repoUrl);
     const tokenFingerprint = token
       ? createHash('sha256').update(token).digest('hex').slice(0, 8)
@@ -32,15 +39,37 @@ export class RepoCloneStore {
 
     const existing = cache.get(key);
     if (existing && Date.now() - existing.lastPulled < STALE_MS) {
-      return existing.dir;
+      return { dir: existing.dir, stale: false };
     }
 
+    if (inFlight.has(key)) {
+      return inFlight.get(key)!;
+    }
+
+    const work = this.doCloneOrPull(key, repoDir, repoUrl, provider, token, existing);
+    inFlight.set(key, work);
+    try {
+      return await work;
+    } finally {
+      inFlight.delete(key);
+    }
+  }
+
+  private static async doCloneOrPull(
+    key: string,
+    repoDir: string,
+    repoUrl: string,
+    provider: string,
+    token: string | undefined,
+    existing: CloneEntry | undefined,
+  ): Promise<CloneResult> {
     await fs.mkdir(REPOS_DIR, { recursive: true });
 
     const authedUrl = this.buildAuthUrl(repoUrl, provider, token);
 
     const exists = await fs.access(path.join(repoDir, '.git')).then(() => true).catch(() => false);
 
+    let pullSucceeded = true;
     if (exists) {
       try {
         await exec('git', ['remote', 'set-url', 'origin', authedUrl], {
@@ -55,18 +84,45 @@ export class RepoCloneStore {
           timeout: 60_000,
           env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
         });
-      } catch {
-        // pull failed — stale clone is still usable
+      } catch (err) {
+        pullSucceeded = false;
+        console.warn(`[RepoCloneStore] git pull failed for ${key}:`, (err as Error).message);
       }
     } else {
-      await exec('git', ['clone', '--depth', '1', authedUrl, repoDir], {
-        timeout: 120_000,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-      });
+      try {
+        await exec('git', ['clone', '--depth', '1', authedUrl, repoDir], {
+          timeout: 120_000,
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        });
+      } catch (err) {
+        await fs.rm(repoDir, { recursive: true, force: true }).catch(() => {});
+        const msg = (err as Error).message || 'Unknown git clone error';
+        const isAuth = /authentication|auth|403|401/i.test(msg);
+        const isTimeout = /timed?\s*out|SIGTERM/i.test(msg);
+        if (isAuth) {
+          throw new AppError(401, 'REPO_AUTH_FAILED', 'Failed to clone repository — please check your access token.');
+        }
+        if (isTimeout) {
+          throw new AppError(504, 'REPO_CLONE_TIMEOUT', 'Repository clone timed out. The repo may be too large or the server unreachable.');
+        }
+        throw new AppError(502, 'REPO_CLONE_FAILED', `Failed to clone repository: ${msg.slice(0, 200)}`);
+      }
     }
 
-    cache.set(key, { dir: repoDir, lastPulled: Date.now() });
-    return repoDir;
+    // Strip auth token from persisted .git/config
+    if (token) {
+      await exec('git', ['remote', 'set-url', 'origin', repoUrl], {
+        cwd: repoDir,
+        timeout: 10_000,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      }).catch(() => {});
+    }
+
+    cache.set(key, {
+      dir: repoDir,
+      lastPulled: pullSucceeded ? Date.now() : (existing?.lastPulled ?? 0),
+    });
+    return { dir: repoDir, stale: !pullSucceeded };
   }
 
   private static buildAuthUrl(repoUrl: string, provider: string, token?: string): string {

@@ -72,8 +72,9 @@ export class JiraController {
         throw new AppError(400, 'INVALID_UPDATE', 'No valid fields provided for update.');
       }
 
+      const expectedUpdated = typeof req.body.expectedUpdated === 'string' ? req.body.expectedUpdated : undefined;
       const client = this.getClient(req);
-      await client.updateTicket(ticketKey, changes);
+      await client.updateTicket(ticketKey, changes, expectedUpdated);
 
       res.json({ success: true, data: { message: 'Ticket updated successfully' } });
       usageTracker.record(getCredentials(req).jiraEmail, 'sync_to_jira', ticketKey)

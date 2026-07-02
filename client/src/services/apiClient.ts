@@ -37,11 +37,19 @@ export function updateApiTemperature(temp: number) {
   currentTemperature = temp;
 }
 
-const LONG_RUNNING_PATHS = ['/api/ai/improve', '/api/ai/refine', '/api/ai/enrich'];
+const LONG_RUNNING_PATHS = [
+  '/api/ai/improve',
+  '/api/ai/refine',
+  '/api/ai/enrich',
+  '/api/ai/compose',
+  '/api/ai/breakdown',
+  '/api/ai/score',
+  '/api/ai/questions',
+];
 const DEFAULT_TIMEOUT_MS = 60_000;
 const LONG_TIMEOUT_MS = 600_000;
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, externalSignal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
@@ -63,12 +71,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = externalSignal
+    ? AbortSignal.any([controller.signal, externalSignal])
+    : controller.signal;
 
   try {
     const response = await fetch(path, {
       ...options,
       headers,
-      signal: controller.signal,
+      signal,
     });
 
     const contentType = response.headers.get('content-type') || '';
@@ -89,7 +100,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       return await response.text() as T;
     }
 
-    const data: ApiResponse<T> = await response.json();
+    let data: ApiResponse<T>;
+    try {
+      const rawText = await response.text();
+      data = JSON.parse(rawText.trim());
+    } catch {
+      throw new ApiClientError(
+        `Failed to parse server response (HTTP ${response.status}). The connection may have been interrupted.`,
+        'PARSE_ERROR',
+        response.status,
+      );
+    }
 
     if (!data.success || data.error) {
       throw new ApiClientError(
@@ -246,22 +267,22 @@ export const api = {
   },
 
   ai: {
-    score: (body: unknown) =>
-      request('/api/ai/score', { method: 'POST', body: JSON.stringify(body) }),
-    improve: (body: ImproveRequest) =>
-      request<ImproveResponse>('/api/ai/improve', { method: 'POST', body: JSON.stringify(body) }),
-    questions: (body: unknown) =>
-      request('/api/ai/questions', { method: 'POST', body: JSON.stringify(body) }),
-    enrich: (body: ImproveRequest) =>
-      request<ImproveResponse>('/api/ai/enrich', { method: 'POST', body: JSON.stringify(body) }),
-    compose: (body: ComposeRequest) =>
-      request<ImproveResponse>('/api/ai/compose', { method: 'POST', body: JSON.stringify(body) }),
-    breakdown: (body: BreakdownRequest) =>
-      request<BreakdownResponse>('/api/ai/breakdown', { method: 'POST', body: JSON.stringify(body) }),
-    annotate: (body: unknown) =>
-      request('/api/ai/annotate', { method: 'POST', body: JSON.stringify(body) }),
-    refine: (body: RefineRequest) =>
-      request<RefineResponse>('/api/ai/refine', { method: 'POST', body: JSON.stringify(body) }),
+    score: (body: unknown, signal?: AbortSignal) =>
+      request('/api/ai/score', { method: 'POST', body: JSON.stringify(body) }, signal),
+    improve: (body: ImproveRequest, signal?: AbortSignal) =>
+      request<ImproveResponse>('/api/ai/improve', { method: 'POST', body: JSON.stringify(body) }, signal),
+    questions: (body: unknown, signal?: AbortSignal) =>
+      request('/api/ai/questions', { method: 'POST', body: JSON.stringify(body) }, signal),
+    enrich: (body: ImproveRequest, signal?: AbortSignal) =>
+      request<ImproveResponse>('/api/ai/enrich', { method: 'POST', body: JSON.stringify(body) }, signal),
+    compose: (body: ComposeRequest, signal?: AbortSignal) =>
+      request<ImproveResponse>('/api/ai/compose', { method: 'POST', body: JSON.stringify(body) }, signal),
+    breakdown: (body: BreakdownRequest, signal?: AbortSignal) =>
+      request<BreakdownResponse>('/api/ai/breakdown', { method: 'POST', body: JSON.stringify(body) }, signal),
+    annotate: (body: unknown, signal?: AbortSignal) =>
+      request('/api/ai/annotate', { method: 'POST', body: JSON.stringify(body) }, signal),
+    refine: (body: RefineRequest, signal?: AbortSignal) =>
+      request<RefineResponse>('/api/ai/refine', { method: 'POST', body: JSON.stringify(body) }, signal),
     repoUsage: (body: unknown) =>
       request('/api/ai/repo-usage', { method: 'POST', body: JSON.stringify(body) }),
     document: (body: unknown) =>

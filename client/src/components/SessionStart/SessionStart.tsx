@@ -105,9 +105,15 @@ export function SessionStart() {
     setError(null);
     setLoading(true);
 
+    if (!appConfig) {
+      setError('App configuration not loaded. Please refresh the page.');
+      setLoading(false);
+      return;
+    }
+
     try {
       const result = await api.session.validate({
-        geminiModel: geminiModel || appConfig!.defaultModel,
+        geminiModel: geminiModel || appConfig.defaultModel,
         jiraEmail,
         jiraApiToken,
       }) as any;
@@ -119,7 +125,7 @@ export function SessionStart() {
       }
 
       const creds = {
-        geminiModel: (geminiModel || appConfig!.defaultModel) as GeminiModel,
+        geminiModel: (geminiModel || appConfig.defaultModel) as GeminiModel,
         jiraEmail,
         jiraApiToken,
         ...(githubToken.trim() && { githubToken: githubToken.trim() }),

@@ -9,15 +9,22 @@ interface RefinementChatProps {
   improvements: TicketChanges;
   repoContextPrompt?: string;
   referenceContent?: string;
+  repoUrl?: string;
+  skillsMarkdown?: string;
   onUpdate: (updated: TicketChanges) => void;
 }
 
-export function RefinementChat({ ticket, improvements, repoContextPrompt, referenceContent, onUpdate }: RefinementChatProps) {
+export function RefinementChat({ ticket, improvements, repoContextPrompt, referenceContent, repoUrl, skillsMarkdown, onUpdate }: RefinementChatProps) {
   const [messages, setMessages] = useState<RefinementMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -27,6 +34,10 @@ export function RefinementChat({ ticket, improvements, repoContextPrompt, refere
     e.preventDefault();
     const instruction = input.trim();
     if (!instruction || loading) return;
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     const userMsg: RefinementMessage = {
       id: `msg_${Date.now()}`,
@@ -47,7 +58,9 @@ export function RefinementChat({ ticket, improvements, repoContextPrompt, refere
         conversationHistory: [...messages, userMsg],
         repoContextPrompt,
         referenceContent,
-      }) as RefineResponse;
+        repoUrl,
+        skillsMarkdown,
+      }, controller.signal) as RefineResponse;
 
       const assistantMsg: RefinementMessage = {
         id: `msg_${Date.now()}_reply`,
@@ -60,6 +73,7 @@ export function RefinementChat({ ticket, improvements, repoContextPrompt, refere
       setMessages((prev) => [...prev, assistantMsg]);
       onUpdate(result.updatedTicket);
     } catch (err: any) {
+      if (err.name === 'AbortError' || controller.signal.aborted) return;
       const errorMsg: RefinementMessage = {
         id: `msg_${Date.now()}_err`,
         role: 'assistant',

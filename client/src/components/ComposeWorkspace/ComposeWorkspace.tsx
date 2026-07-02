@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSession } from '../../context/SessionContext';
 import { api, formatApiErrorMessage } from '../../services/apiClient';
 import { Card } from '../ui/Card';
@@ -32,7 +32,7 @@ import type {
 import { DETAIL_LEVEL_META, suggestedDetailLevel } from 'ticketcraft-shared';
 import {
   Sparkles, Send, RefreshCw, ArrowLeft,
-  Layers, CheckCircle2, Loader2, PenLine, BookOpen,
+  Layers, CheckCircle2, XCircle, AlertTriangle, Loader2, PenLine, BookOpen,
   Settings, ScrollText, BarChart3,
 } from 'lucide-react';
 
@@ -65,6 +65,7 @@ export function ComposeWorkspace() {
   // UI state
   const [step, setStep] = useState<ComposeStep>('setup');
   const [loading, setLoading] = useState(false);
+  const [aiInFlight, setAiInFlight] = useState(false);
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [useCursor, setUseCursor] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +73,11 @@ export function ComposeWorkspace() {
   const [showLogs, setShowLogs] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
 
-  // isAdmin is now provided by SessionContext after login
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
   useEffect(() => {
     setLoadingProjects(true);
@@ -81,7 +86,9 @@ export function ComposeWorkspace() {
       if (p.length > 0 && !projectKey) {
         setProjectKey(p[0].key);
       }
-    }).catch(() => {}).finally(() => setLoadingProjects(false));
+    }).catch((err) => {
+      setError(formatApiErrorMessage(err) || 'Failed to load Jira projects.');
+    }).finally(() => setLoadingProjects(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleProjectSearch = useCallback((query: string) => {
@@ -103,7 +110,9 @@ export function ComposeWorkspace() {
         const story = nonSubtask.find((t) => t.name === 'Story');
         setIssueType(story?.name || nonSubtask[0].name);
       }
-    }).catch(() => {});
+    }).catch((err) => {
+      setError(formatApiErrorMessage(err) || 'Failed to load issue types for this project.');
+    });
     api.jira.getAssignableUsers(projectKey).then(setAssignableUsers).catch(() => {});
   }, [projectKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -186,7 +195,11 @@ export function ComposeWorkspace() {
   };
 
   const handleCompose = useCallback(async () => {
-    if (!freeText.trim() || !projectKey) return;
+    if (!freeText.trim() || !projectKey || aiInFlight) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setAiInFlight(true);
     setStep('composing');
     setError(null);
 
@@ -201,17 +214,24 @@ export function ComposeWorkspace() {
         referenceContent,
         repoUrl: connectedRepoUrl,
         useCursor,
-      });
+      }, controller.signal);
       setComposed(result.improvedTicket);
       setStep('review');
     } catch (err: any) {
+      if (err.name === 'AbortError' || controller.signal.aborted) return;
       setError(formatApiErrorMessage(err) || 'Composition failed.');
       setStep('setup');
+    } finally {
+      setAiInFlight(false);
     }
-  }, [freeText, projectKey, issueType, selectedTemplate, detailLevel, repoContextPrompt, referenceContent, connectedRepoUrl, useCursor]);
+  }, [freeText, projectKey, issueType, selectedTemplate, detailLevel, repoContextPrompt, referenceContent, connectedRepoUrl, useCursor, aiInFlight]);
 
   const handleBreakdown = async () => {
-    if (!composed) return;
+    if (!composed || aiInFlight) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setAiInFlight(true);
     setStep('breaking');
     setError(null);
 
@@ -225,13 +245,16 @@ export function ComposeWorkspace() {
         referenceContent,
         repoUrl: connectedRepoUrl,
         useCursor,
-      });
+      }, controller.signal);
       setBreakdownTasks(result.tasks);
       setBreakdownRationale(result.rationale);
       setStep('breakdown');
     } catch (err: any) {
+      if (err.name === 'AbortError' || controller.signal.aborted) return;
       setError(formatApiErrorMessage(err) || 'Breakdown failed.');
       setStep('review');
+    } finally {
+      setAiInFlight(false);
     }
   };
 
@@ -476,7 +499,7 @@ export function ComposeWorkspace() {
               <Button
                 icon={<Sparkles className="w-4 h-4" />}
                 onClick={handleCompose}
-                disabled={!freeText.trim() || !projectKey || !issueType || loadingProjects}
+                disabled={!freeText.trim() || !projectKey || !issueType || loadingProjects || aiInFlight}
                 size="lg"
               >
                 Generate Ticket
@@ -655,9 +678,26 @@ export function ComposeWorkspace() {
       {step === 'done' && (
         <Card>
           <div className="space-y-4 py-4">
-            <div className="flex items-center justify-center gap-2 text-green-600">
-              <CheckCircle2 className="w-6 h-6" />
-              <span className="text-lg font-semibold">Tickets Created</span>
+            <div className={`flex items-center justify-center gap-2 ${
+              batchResult && batchResult.errors.length > 0 && batchResult.subtasks.length === 0
+                ? 'text-red-600'
+                : batchResult && batchResult.errors.length > 0
+                  ? 'text-amber-600'
+                  : 'text-green-600'
+            }`}>
+              {batchResult && batchResult.errors.length > 0 && batchResult.subtasks.length === 0
+                ? <XCircle className="w-6 h-6" />
+                : batchResult && batchResult.errors.length > 0
+                  ? <AlertTriangle className="w-6 h-6" />
+                  : <CheckCircle2 className="w-6 h-6" />
+              }
+              <span className="text-lg font-semibold">
+                {batchResult && batchResult.errors.length > 0 && batchResult.subtasks.length === 0
+                  ? 'Sub-tasks Failed'
+                  : batchResult && batchResult.errors.length > 0
+                    ? 'Partially Created'
+                    : 'Tickets Created'}
+              </span>
             </div>
 
             {singleCreatedKey && (

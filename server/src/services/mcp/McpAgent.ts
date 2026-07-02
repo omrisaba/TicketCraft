@@ -81,6 +81,14 @@ export class McpAgent {
       if (decision.done || !decision.tool) break;
 
       const toolName = decision.tool;
+      const validTool = tools.find(t => t.name === toolName);
+      if (!validTool) {
+        contextParts.push(`### Tool: ${toolName} — ERROR: Tool not found (hallucinated by LLM)`);
+        callLog.push({ tool: toolName, args: {}, success: false, reasoning: decision.reasoning });
+        totalCalls++;
+        continue;
+      }
+
       const toolArgs = this.injectRepoDefaults(decision.arguments || {});
 
       const callStart = Date.now();
@@ -95,10 +103,15 @@ export class McpAgent {
           .join('\n');
 
         const truncated = text.length > 12_000 ? text.slice(0, 12_000) + '\n... (truncated)' : text;
-        contextParts.push(`### Tool: ${toolName}\nArgs: ${JSON.stringify(toolArgs)}\n\n${truncated}`);
-        callLog.push({ tool: toolName, args: toolArgs, success: true, reasoning: decision.reasoning });
-
-        logBuffer.add({ category: 'mcp', operation: 'tools/call', tool: toolName, provider, durationMs: callDuration, success: true, meta: { args: toolArgs, responseLength: text.length, reasoning: decision.reasoning } });
+        if (result.isError) {
+          contextParts.push(`### Tool: ${toolName} — ERROR (from tool): ${truncated}`);
+          callLog.push({ tool: toolName, args: toolArgs, success: false, reasoning: decision.reasoning });
+          logBuffer.add({ category: 'mcp', operation: 'tools/call', tool: toolName, provider, durationMs: callDuration, success: false, error: truncated, meta: { args: toolArgs, reasoning: decision.reasoning } });
+        } else {
+          contextParts.push(`### Tool: ${toolName}\nArgs: ${JSON.stringify(toolArgs)}\n\n${truncated}`);
+          callLog.push({ tool: toolName, args: toolArgs, success: true, reasoning: decision.reasoning });
+          logBuffer.add({ category: 'mcp', operation: 'tools/call', tool: toolName, provider, durationMs: callDuration, success: true, meta: { args: toolArgs, responseLength: text.length, reasoning: decision.reasoning } });
+        }
       } catch (err) {
         const callDuration = Date.now() - callStart;
         contextParts.push(`### Tool: ${toolName} — ERROR: ${(err as Error).message}`);

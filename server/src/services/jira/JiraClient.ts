@@ -7,6 +7,7 @@ import TurndownService from 'turndown';
 export class JiraClient implements IssueTracker {
   private baseUrl: string;
   private authHeader: string;
+  private static readonly storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10016';
 
   constructor(baseUrl: string, email: string, apiToken: string) {
     this.baseUrl = baseUrl;
@@ -52,7 +53,7 @@ export class JiraClient implements IssueTracker {
 
   async getTicket(ticketKey: string): Promise<Ticket> {
     const data = await this.request<any>(
-      `/issue/${ticketKey}?expand=renderedFields&fields=summary,description,status,priority,assignee,reporter,labels,customfield_10016,issuetype,issuelinks,attachment,comment,created,updated,parent,subtasks`,
+      `/issue/${ticketKey}?expand=renderedFields&fields=summary,description,status,priority,assignee,reporter,labels,${JiraClient.storyPointsField},issuetype,issuelinks,attachment,comment,created,updated,parent,subtasks`,
     );
 
     const fields = data.fields;
@@ -64,16 +65,16 @@ export class JiraClient implements IssueTracker {
       id: data.id,
       key: data.key,
       summary: fields.summary || '',
-      description: this.htmlToMarkdown(rendered.description) || this.extractTextFallback(fields.description),
+      description: JiraClient.extractDescription(this.htmlToMarkdown(rendered.description) || this.extractTextFallback(fields.description)),
       status: fields.status?.name || 'Unknown',
       priority: fields.priority?.name || null,
       assignee: fields.assignee?.displayName || null,
       reporter: fields.reporter?.displayName || null,
       reporterEmail: fields.reporter?.emailAddress || null,
       labels: fields.labels || [],
-      storyPoints: fields.customfield_10016 ?? null,
+      storyPoints: fields[JiraClient.storyPointsField] ?? null,
       issueType: fields.issuetype?.name || 'Task',
-      acceptanceCriteria: null,
+      acceptanceCriteria: JiraClient.extractAcceptanceCriteria(this.htmlToMarkdown(rendered.description) || this.extractTextFallback(fields.description)),
       parent: fields.parent ? {
         key: fields.parent.key,
         summary: fields.parent.fields?.summary || '',
@@ -108,7 +109,21 @@ export class JiraClient implements IssueTracker {
     };
   }
 
-  async updateTicket(ticketKey: string, changes: TicketChanges): Promise<void> {
+  async updateTicket(ticketKey: string, changes: TicketChanges, expectedUpdated?: string): Promise<void> {
+    if (expectedUpdated) {
+      const current = await this.request<any>(
+        `/issue/${ticketKey}?fields=updated`,
+      );
+      const jiraUpdated = current?.fields?.updated;
+      if (jiraUpdated && jiraUpdated !== expectedUpdated) {
+        throw new AppError(
+          409,
+          'JIRA_CONCURRENT_EDIT',
+          'This ticket was modified in Jira since you last fetched it. Please refresh the ticket and try again.',
+        );
+      }
+    }
+
     const updateFields: any = {};
 
     if (changes.summary !== undefined) {
@@ -117,19 +132,23 @@ export class JiraClient implements IssueTracker {
 
     const hasDescription = changes.description !== undefined;
     const hasAc = changes.acceptanceCriteria !== undefined && changes.acceptanceCriteria !== null;
-    if (hasDescription) {
-      let fullDescription = changes.description ?? '';
-      if (changes.acceptanceCriteria) {
-        fullDescription += `\n\n## Acceptance Criteria\n\n${changes.acceptanceCriteria}`;
+    if (hasDescription || hasAc) {
+      let baseDescription: string;
+      if (hasDescription) {
+        baseDescription = changes.description ?? '';
+      } else {
+        const existing = await this.getTicket(ticketKey);
+        baseDescription = existing.description ?? '';
+      }
+      baseDescription = JiraClient.stripAcceptanceCriteriaSection(baseDescription);
+      const ac = hasAc ? changes.acceptanceCriteria : undefined;
+      let fullDescription = baseDescription;
+      if (ac) {
+        fullDescription += `\n\n## Acceptance Criteria\n\n${ac}`;
       }
       if (fullDescription) {
         updateFields.description = this.textToAdf(fullDescription);
       }
-    } else if (hasAc) {
-      const existing = await this.getTicket(ticketKey);
-      let fullDescription = existing.description ?? '';
-      fullDescription += `\n\n## Acceptance Criteria\n\n${changes.acceptanceCriteria}`;
-      updateFields.description = this.textToAdf(fullDescription);
     }
 
     if (changes.labels !== undefined) {
@@ -137,7 +156,7 @@ export class JiraClient implements IssueTracker {
     }
 
     if (changes.storyPoints !== undefined) {
-      updateFields.customfield_10016 = changes.storyPoints;
+      updateFields[JiraClient.storyPointsField] = changes.storyPoints;
     }
 
     await this.request(`/issue/${ticketKey}`, {
@@ -197,7 +216,7 @@ export class JiraClient implements IssueTracker {
     }
 
     if (opts.changes.labels?.length) fields.labels = opts.changes.labels;
-    if (opts.changes.storyPoints != null) fields.customfield_10016 = opts.changes.storyPoints;
+    if (opts.changes.storyPoints != null) fields[JiraClient.storyPointsField] = opts.changes.storyPoints;
     if (opts.parentKey) fields.parent = { key: opts.parentKey };
     if (opts.assigneeAccountId) fields.assignee = { accountId: opts.assigneeAccountId };
 
@@ -312,6 +331,7 @@ export class JiraClient implements IssueTracker {
           issueType: st.issueType,
           changes: st.changes,
           parentKey: isSubtaskType ? parent.key : undefined,
+          assigneeAccountId: opts.parentTicket.assigneeAccountId,
         });
         if (!isSubtaskType) {
           try { await this.linkTickets(created.key, parent.key, 'Relates'); } catch { /* best-effort */ }
@@ -346,6 +366,30 @@ export class JiraClient implements IssueTracker {
         },
       }),
     });
+  }
+
+  private static readonly AC_HEADING_RE = /\n{0,3}#{1,3}\s*Acceptance\s+Criteria\s*\n/i;
+
+  private static extractAcceptanceCriteria(text: string | null): string | null {
+    if (!text) return null;
+    const match = JiraClient.AC_HEADING_RE.exec(text);
+    if (!match) return null;
+    const ac = text.slice(match.index + match[0].length).trim();
+    return ac || null;
+  }
+
+  private static extractDescription(text: string | null): string | null {
+    if (!text) return null;
+    const match = JiraClient.AC_HEADING_RE.exec(text);
+    if (!match) return text;
+    const desc = text.slice(0, match.index).trim();
+    return desc || null;
+  }
+
+  private static stripAcceptanceCriteriaSection(text: string): string {
+    const match = JiraClient.AC_HEADING_RE.exec(text);
+    if (!match) return text;
+    return text.slice(0, match.index).trim();
   }
 
   private mapLinkedTicket(link: any): LinkedTicket {
