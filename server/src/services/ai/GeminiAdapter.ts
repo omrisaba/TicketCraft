@@ -176,13 +176,24 @@ export class GeminiAdapter implements AIProvider {
     return parts.join('\n');
   }
 
-  async validateApiKey(): Promise<boolean> {
+  async validateApiKey(): Promise<void> {
+    const url = `${GEMINI_API_BASE}/models`;
     try {
-      const url = `${GEMINI_API_BASE}/models?key=${this.apiKey}`;
-      const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-      return response.ok;
-    } catch {
-      return false;
+      const response = await fetch(url, {
+        headers: { 'x-goog-api-key': this.apiKey },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (response.ok) return;
+      if (response.status === 401 || response.status === 403) {
+        throw new AppError(401, 'GEMINI_AUTH_FAILED', 'Gemini API key is invalid.');
+      }
+      if (response.status === 429) {
+        throw new AppError(502, 'GEMINI_API_ERROR', 'Gemini API rate limit exceeded. Try again later.');
+      }
+      throw new AppError(502, 'GEMINI_API_ERROR', `Gemini API error (upstream ${response.status}).`);
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      throw new AppError(503, 'GEMINI_UNAVAILABLE', 'Could not reach Gemini to verify the API key.');
     }
   }
 

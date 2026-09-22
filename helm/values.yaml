@@ -64,15 +64,15 @@ affinity: {}
 # ENVIRONMENT CONFIGURATION
 # =============================================================================
 # Admin-level settings shared by all users. Per-user credentials (Jira email,
-# Jira API token, GitHub/GitLab tokens) are provided at login and stored
-# in-memory only — never on the server.
+# Jira API token, Gemini API key, GitHub/GitLab tokens) are provided at login
+# and stored in-memory only — never on the server.
 # =============================================================================
 
 env:
-  # Gemini API key (required, admin-level)
+  # Optional shared Gemini API key used when a user does not provide their own
   GEMINI_API_KEY: ""
   # Default Gemini model
-  GEMINI_DEFAULT_MODEL: "gemini-3.1-pro-preview"
+  GEMINI_DEFAULT_MODEL: "gemini-3.8-flash"
   # Jira Cloud base URL (required)
   JIRA_BASE_URL: ""
   # Server ports
@@ -88,7 +88,7 @@ env:
   AUTOMATION_DONE_LABEL: "processedByTicketCraft"
 
 # Sensitive env vars loaded from a Kubernetes Secret
-# Set secretName to an existing secret containing GEMINI_API_KEY
+# Set secretName to an existing secret containing GEMINI_API_KEY (optional fallback)
 envSecret:
   enabled: false
   secretName: "ticketcraft-secrets"

@@ -1,13 +1,15 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { AdminSettings } from 'ticketcraft-shared';
+import { AVAILABLE_MODELS, DEFAULT_MODEL, type AdminSettings } from 'ticketcraft-shared';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SETTINGS_PATH = path.resolve(__dirname, '../../../data/admin-settings.json');
 
+const VALID_MODEL_IDS = new Set(AVAILABLE_MODELS.map((m) => m.id));
+
 const DEFAULTS: AdminSettings = {
-  defaultModel: 'gemini-3.5-flash',
+  defaultModel: DEFAULT_MODEL,
   defaultTemperature: 0.3,
   scanJql: 'project = "MYPROJECT" AND status = "To Do" ORDER BY created DESC',
   githubMcpUrl: '',
@@ -32,6 +34,9 @@ export class AdminStore {
       const raw = await fs.readFile(SETTINGS_PATH, 'utf-8');
       const saved = JSON.parse(raw) as Partial<AdminSettings>;
       cachedSettings = { ...DEFAULTS, ...saved };
+      if (!VALID_MODEL_IDS.has(cachedSettings.defaultModel)) {
+        cachedSettings.defaultModel = DEFAULT_MODEL;
+      }
     } catch {
       cachedSettings = { ...DEFAULTS };
     }

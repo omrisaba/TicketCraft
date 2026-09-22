@@ -27,8 +27,8 @@ export const config = {
   },
 
   gemini: {
-    apiKey: process.env.GEMINI_API_KEY || '',
-    defaultModel: process.env.GEMINI_DEFAULT_MODEL || 'gemini-3.5-flash',
+    apiKey: (process.env.GEMINI_API_KEY || '').trim(),
+    defaultModel: process.env.GEMINI_DEFAULT_MODEL || 'gemini-3.8-flash',
   },
 
   jira: {
@@ -47,7 +47,6 @@ export const config = {
 
 export function validateConfig() {
   const errors: string[] = [];
-  if (!config.gemini.apiKey) errors.push('GEMINI_API_KEY is required');
   if (!config.jira.baseUrl) errors.push('JIRA_BASE_URL is required');
   if (errors.length > 0) {
     console.error('[CONFIG ERROR] Missing required environment variables:');

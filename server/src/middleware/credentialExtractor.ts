@@ -19,11 +19,14 @@ export function credentialExtractor(
   const githubToken = req.headers['x-github-token'] as string | undefined;
   const gitlabToken = req.headers['x-gitlab-token'] as string | undefined;
   const cursorApiKey = req.headers['x-cursor-api-key'] as string | undefined;
+  const headerGeminiKey = (req.headers['x-gemini-api-key'] as string | undefined)?.trim();
+  const geminiApiKey = headerGeminiKey || config.gemini.apiKey.trim();
 
   const errors: string[] = [];
 
   if (!jiraEmail?.trim()) errors.push('Missing X-Jira-Email header');
   if (!jiraApiToken?.trim()) errors.push('Missing X-Jira-Token header');
+  if (!geminiApiKey) errors.push('Gemini API key is required (X-Gemini-Api-Key or GEMINI_API_KEY)');
 
   if (geminiModel && !VALID_MODEL_IDS.has(geminiModel)) {
     errors.push(`Invalid model: ${geminiModel}. Valid models: ${[...VALID_MODEL_IDS].join(', ')}`);
@@ -50,7 +53,7 @@ export function credentialExtractor(
   }
 
   (req as AuthenticatedRequest).credentials = {
-    geminiApiKey: config.gemini.apiKey,
+    geminiApiKey,
     geminiModel: (geminiModel as GeminiModel) || (config.gemini.defaultModel as GeminiModel),
     geminiTemperature: temperature,
     jiraEmail: jiraEmail!.trim(),

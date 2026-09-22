@@ -17,6 +17,7 @@ const CRED = [
   { $ref: '#/components/parameters/XGeminiTemperature' },
   { $ref: '#/components/parameters/XGithubToken' },
   { $ref: '#/components/parameters/XGitlabToken' },
+  { $ref: '#/components/parameters/XGeminiApiKey' },
 ];
 
 /** @typedef {{ parameters?: unknown[] } & Record<string, unknown>} Op */
@@ -71,6 +72,13 @@ const components = {
       required: false,
       schema: { type: 'string' },
       description: 'Access token for private GitLab repos / MCP.',
+    },
+    XGeminiApiKey: {
+      name: 'X-Gemini-Api-Key',
+      in: 'header',
+      required: false,
+      schema: { type: 'string' },
+      description: 'User Gemini API key. Required when the server has no GEMINI_API_KEY; otherwise an optional override. Sent by the SPA on authenticated routes after login.',
     },
     TicketKeyPath: {
       name: 'ticketKey',
@@ -265,6 +273,7 @@ const paths = {
           jiraEmail: { type: 'string' },
           jiraApiToken: { type: 'string' },
           geminiModel: { type: 'string' },
+          geminiApiKey: { type: 'string' },
         },
       }),
       responses: { 200: ok },
@@ -870,7 +879,7 @@ const doc = {
     title: 'TicketCraft API',
     version: '1.0.0',
     description:
-      'HTTP JSON API used by the TicketCraft UI and integrators. Most write routes require `X-Jira-Email` and `X-Jira-Token`. Optional `X-Gemini-Model`, `X-Gemini-Temperature`, `X-Github-Token`, `X-Gitlab-Token` mirror the SPA. Admin routes still require the same headers (no separate admin token). Draft/history routes only require `X-Jira-Email`.',
+      'HTTP JSON API used by the TicketCraft UI and integrators. Most write routes require `X-Jira-Email` and `X-Jira-Token`. `X-Gemini-Api-Key` is required when the server has no `GEMINI_API_KEY` fallback, otherwise it is an optional override. Optional `X-Gemini-Model`, `X-Gemini-Temperature`, `X-Github-Token`, `X-Gitlab-Token` mirror the SPA. Admin routes still require the same headers (no separate admin token). Draft/history routes only require `X-Jira-Email`.',
   },
   servers: [{ url: '/', description: 'TicketCraft server (same origin as deployment)' }],
   tags: [

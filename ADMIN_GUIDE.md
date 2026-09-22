@@ -6,7 +6,7 @@ This guide covers deployment, configuration, security architecture, and API refe
 
 ## 1. Prerequisites
 
-- **Google Gemini API key** — get one at https://aistudio.google.com/apikey
+- **Google Gemini API key** — users provide their own at login (https://aistudio.google.com/apikey). Optionally set `GEMINI_API_KEY` as a shared fallback.
 - **Jira Cloud instance URL** (e.g., `https://yourcompany.atlassian.net`)
 - One of the following, depending on deployment method:
   - **Local development:** Node.js 18+ and npm 9+
@@ -39,10 +39,10 @@ This creates self-signed certificates under `server/certs/`. If you have `mkcert
 cp .env.example .env
 ```
 
-**Step 4.** Edit `.env` and set the two required variables:
+**Step 4.** Edit `.env` and set the required variable:
 
-- **GEMINI_API_KEY** — your Google Gemini API key
 - **JIRA_BASE_URL** — your Jira Cloud instance URL (e.g., `https://yourcompany.atlassian.net`)
+- **GEMINI_API_KEY** (optional) — shared fallback Gemini key. If omitted, each user must provide their own key at login.
 
 **Step 5.** Start the application:
 
@@ -70,12 +70,13 @@ docker build --build-arg COMMIT_COUNT=$(git rev-list --count HEAD) -t ticketcraf
 docker run -d \
   --name ticketcraft \
   -p 3001:3001 \
-  -e GEMINI_API_KEY=your-gemini-api-key \
   -e JIRA_BASE_URL=https://yourcompany.atlassian.net \
-  -e GEMINI_DEFAULT_MODEL=gemini-3.1-pro-preview \
+  -e GEMINI_DEFAULT_MODEL=gemini-3.8-flash \
   -v ticketcraft-data:/app/server/data \
   ticketcraft
 ```
+
+Set `-e GEMINI_API_KEY=...` only if you want a shared fallback key. Otherwise each user supplies their own key at login.
 
 The `-v` flag mounts a volume for persistent storage (drafts, history, automation data).
 
@@ -83,13 +84,15 @@ The app will be available at http://localhost:3001.
 
 ### Option C: Kubernetes with Helm
 
-**Step 1.** Create a Kubernetes Secret for the Gemini API key:
+**Step 1.** (Optional) Create a Kubernetes Secret for a shared fallback Gemini API key:
 
 ```
 kubectl create secret generic ticketcraft-secrets \
   --from-literal=GEMINI_API_KEY=your-gemini-api-key \
   -n your-namespace
 ```
+
+If you skip this, each user must provide a Gemini API key at login.
 
 **Step 2.** Customize your values file. Start from the defaults:
 
@@ -100,7 +103,7 @@ cp helm/values.yaml my-values.yaml
 At minimum, set:
 
 - **env.JIRA_BASE_URL** — your Jira Cloud URL
-- **envSecret.enabled** — set to `true` to load the Gemini key from the secret
+- **envSecret.enabled** — set to `true` only if you created a Gemini fallback secret
 - **ingress.enabled** — set to `true` and configure hosts for external access
 
 **Step 3.** Install the chart:
@@ -117,7 +120,7 @@ helm upgrade --install ticketcraft ./helm \
   -n your-namespace
 ```
 
-This enables an OpenShift Route instead of Ingress, applies stricter security contexts, and enables the Kubernetes Secret for the Gemini API key by default.
+This enables an OpenShift Route instead of Ingress, applies stricter security contexts, and can load a Kubernetes Secret for an optional shared Gemini API key.
 
 ### Persistent Storage
 
@@ -131,13 +134,13 @@ TicketCraft stores drafts, session history, automation profiles, and admin setti
 
 | Variable | Description |
 |---|---|
-| GEMINI_API_KEY | Google Gemini API key. Powers all AI operations (scoring, improvement, questions, annotations, chat). |
 | JIRA_BASE_URL | Base URL of your Jira Cloud instance (e.g., `https://yourcompany.atlassian.net`). |
 
 ### Optional Variables
 
 | Variable | Default | Description |
 |---|---|---|
+| GEMINI_API_KEY | (empty) | Optional shared Gemini API key used when a user does not provide their own at login. |
 | PORT | 3001 | HTTPS listen port (primary app port). |
 | HTTP_PORT | 3000 | Plain HTTP port. Redirects to HTTPS when TLS is configured. |
 | HOST | 0.0.0.0 | Network interface to bind to. |
@@ -145,7 +148,7 @@ TicketCraft stores drafts, session history, automation profiles, and admin setti
 | RATE_LIMIT_MAX | 100 | Maximum API requests per IP per 15-minute window. |
 | TLS_CERT_PATH | (empty) | Path to TLS certificate file. When set with TLS_KEY_PATH, enables HTTPS. |
 | TLS_KEY_PATH | (empty) | Path to TLS private key file. |
-| GEMINI_DEFAULT_MODEL | gemini-3.1-pro-preview | Default Gemini model. Users can override per session. |
+| GEMINI_DEFAULT_MODEL | gemini-3.8-flash | Default Gemini model. Users can override per session. |
 | ADMIN_EMAILS | (empty) | Comma-separated Jira email addresses allowed to access admin endpoints (settings, logs, Cursor config). |
 | SESSION_TIMEOUT_MS | 1800000 | Inactivity timeout in milliseconds (default: 30 minutes). |
 | AUTOMATION_TRIGGER_LABEL | readyForTicketCraftRefinement | Jira label that marks a ticket as ready for automated refinement. |
@@ -153,9 +156,8 @@ TicketCraft stores drafts, session history, automation profiles, and admin setti
 
 ### Available Gemini Models
 
-- **gemini-3.1-pro-preview** — highest quality (default)
-- **gemini-3.1-flash-lite-preview** — faster, lower cost
-- **gemini-3-flash-preview** — previous generation flash model
+- **gemini-3.8-flash** — most capable Flash model (default)
+- **gemini-3.7-flash** — previous-generation Flash model
 
 ---
 
@@ -163,9 +165,9 @@ TicketCraft stores drafts, session history, automation profiles, and admin setti
 
 ### Credential Handling
 
-- **No credential storage.** User Jira email and API tokens exist only in browser memory during the active session. They are never written to the server's disk, database, cookies, or localStorage.
-- **Header-based auth.** Credentials travel as request headers (`X-Jira-Email`, `X-Jira-Token`) over HTTPS on every API call. They are never included in URLs or server logs.
-- **Gemini API key.** The Gemini key is configured server-side by the admin. It is never sent to or visible in the browser.
+- **No credential storage.** User Jira email, API tokens, and Gemini API keys exist only in browser memory during the active session. They are never written to the server's disk, database, cookies, or localStorage.
+- **Header-based auth.** Credentials travel as request headers (`X-Jira-Email`, `X-Jira-Token`, `X-Gemini-Api-Key`) over HTTPS on every API call. They are never included in URLs or server logs.
+- **Gemini API key.** Each user provides a Gemini key at login (or via the credentials JSON file). An optional server-side `GEMINI_API_KEY` is used only as a fallback when the user does not send one. The key is not stored on the server.
 
 ### Transport Security
 

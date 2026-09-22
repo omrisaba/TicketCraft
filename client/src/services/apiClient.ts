@@ -60,6 +60,7 @@ async function request<T>(path: string, options: RequestInit = {}, externalSigna
     headers['X-Jira-Token'] = currentCredentials.jiraApiToken;
     headers['X-Gemini-Model'] = currentCredentials.geminiModel;
     headers['X-Gemini-Temperature'] = String(currentTemperature);
+    if (currentCredentials.geminiApiKey) headers['X-Gemini-Api-Key'] = currentCredentials.geminiApiKey;
     if (currentCredentials.githubToken) headers['X-Github-Token'] = currentCredentials.githubToken;
     if (currentCredentials.gitlabToken) headers['X-Gitlab-Token'] = currentCredentials.gitlabToken;
     if (currentCredentials.cursorApiKey) headers['X-Cursor-Api-Key'] = currentCredentials.cursorApiKey;
@@ -233,6 +234,7 @@ export const api = {
       geminiModel: string;
       jiraEmail: string;
       jiraApiToken: string;
+      geminiApiKey?: string;
     }) => request('/api/session/validate', { method: 'POST', body: JSON.stringify(body) }),
   },
 
@@ -303,6 +305,7 @@ export const api = {
         headers['X-Jira-Token'] = currentCredentials.jiraApiToken;
         headers['X-Gemini-Model'] = currentCredentials.geminiModel;
         headers['X-Gemini-Temperature'] = String(currentTemperature);
+        if (currentCredentials.geminiApiKey) headers['X-Gemini-Api-Key'] = currentCredentials.geminiApiKey;
         if (currentCredentials.githubToken) headers['X-Github-Token'] = currentCredentials.githubToken;
         if (currentCredentials.gitlabToken) headers['X-Gitlab-Token'] = currentCredentials.gitlabToken;
         if (currentCredentials.cursorApiKey) headers['X-Cursor-Api-Key'] = currentCredentials.cursorApiKey;

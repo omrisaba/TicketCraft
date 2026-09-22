@@ -38,8 +38,9 @@ service:
   targetPort: 3001
 
 env:
+  # Optional shared Gemini API key used when a user does not provide their own
   GEMINI_API_KEY: ""
-  GEMINI_DEFAULT_MODEL: "gemini-3.1-pro-preview"
+  GEMINI_DEFAULT_MODEL: "gemini-3.8-flash"
   JIRA_BASE_URL: "https://redhat.atlassian.net"
   ADMIN_EMAILS: "osabach@redhat.com,yhabushi@redhat.com"
   PORT: "3001"

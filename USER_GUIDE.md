@@ -25,6 +25,7 @@ TicketCraft is an AI-powered Jira ticket quality tool. It uses Google Gemini to 
 
 - **Jira Cloud account** with access to the target Jira instance
 - **Jira API token** — generate one at https://id.atlassian.com/manage-profile/security/api-tokens
+- **Google Gemini API key** — generate one at https://aistudio.google.com/apikey (unless your administrator has configured a server-wide key)
 - A modern web browser (Chrome, Firefox, Edge, Safari)
 
 ---
@@ -42,6 +43,7 @@ On the Session Start screen you will see:
 - **Jira Host** — pre-configured by the admin, displayed for your reference
 - **Jira Email** — enter the email address associated with your Jira account
 - **Jira API Token** — enter your personal Jira API token
+- **Gemini API Key** — enter your Google Gemini API key (required unless the administrator has configured a server-wide key)
 - **Gemini Model** — select from the dropdown (the admin's default is pre-selected)
 
 **Optional credentials (expandable):**
@@ -56,6 +58,7 @@ On the Session Start screen you will see:
 {
   "jiraEmail": "you@company.com",
   "jiraApiToken": "your-jira-api-token",
+  "geminiApiKey": "",
   "githubToken": "",
   "gitlabToken": "",
   "cursorApiKey": ""
@@ -66,7 +69,7 @@ You can also click "Download Template" to get an empty template file with all su
 
 ### Step 3: Validate and Enter
 
-Click **Start Session**. TicketCraft validates your Jira credentials by making a test call to the Jira API. On success, you enter the main workspace.
+Click **Start Session**. TicketCraft validates your Jira credentials by making a test call to the Jira API, and validates a provided Gemini API key against Google. On success, you enter the main workspace.
 
 **Important notes about your session:**
 
@@ -306,9 +309,9 @@ Users whose email address is listed in the server's `ADMIN_EMAILS` configuration
 
 ## 7. Security and Privacy
 
-- **No credential storage.** Your Jira email and API token exist only in browser memory during the active session. They are never written to the server's disk, database, cookies, or localStorage.
+- **No credential storage.** Your Jira email, API token, and Gemini API key exist only in browser memory during the active session. They are never written to the server's disk, database, cookies, or localStorage.
 - **Encrypted transport.** All communication between your browser and TicketCraft uses HTTPS.
-- **Gemini API key.** The Gemini key is configured server-side by the admin. It is never sent to or visible in the browser.
+- **Gemini API key.** You provide a Gemini key at login (or via the credentials JSON file). It is sent as a request header like your Jira token and is not stored on the server. If the administrator has configured a shared fallback key, you can leave the field empty.
 - **Session timeout.** After 30 minutes of inactivity, the session auto-expires and all credentials are wiped. A 2-minute warning is displayed before expiration.
 - **Rate limiting.** API requests are rate-limited to prevent abuse.
 

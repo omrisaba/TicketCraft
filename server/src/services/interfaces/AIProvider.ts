@@ -80,5 +80,5 @@ export interface AIProvider {
     docType: string,
   ): Promise<GeneratedDocument>;
 
-  validateApiKey(): Promise<boolean>;
+  validateApiKey(): Promise<void>;
 }

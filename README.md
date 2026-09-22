@@ -54,7 +54,7 @@ npm run generate-certs
 
 # Copy .env.example and set admin configuration
 cp .env.example .env
-# Edit .env — set GEMINI_API_KEY and JIRA_BASE_URL (required)
+# Edit .env — set JIRA_BASE_URL (required). GEMINI_API_KEY is an optional shared fallback.
 
 # Start both server and client
 npm run dev
@@ -68,9 +68,9 @@ These are set once by the admin and apply to all users:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GEMINI_API_KEY` | Yes | Google Gemini API key for all AI operations |
+| `GEMINI_API_KEY` | No | Optional shared Gemini API key used when a user does not provide their own at login |
 | `JIRA_BASE_URL` | Yes | Jira instance URL (e.g., `https://yourcompany.atlassian.net`) |
-| `GEMINI_DEFAULT_MODEL` | No | Default model, users can override (default: `gemini-3.5-flash`) |
+| `GEMINI_DEFAULT_MODEL` | No | Default model, users can override (default: `gemini-3.8-flash`) |
 | `ADMIN_EMAILS` | No | Comma-separated emails allowed to access admin panel |
 | `SESSION_TIMEOUT_MS` | No | Inactivity timeout in ms (default: `1800000` / 30 min) |
 | `PORT` | No | HTTPS listen port (default: `3001`) |
@@ -90,6 +90,7 @@ Each user provides their personal credentials when starting a session:
 
 - **Jira Email** — Their Jira account email
 - **Jira API Token** — Generate at https://id.atlassian.com/manage-profile/security/api-tokens
+- **Gemini API Key** — Generate at https://aistudio.google.com/apikey (required unless `GEMINI_API_KEY` is set on the server)
 - **Gemini Model** (optional) — Override the default model from the dropdown
 - **GitHub Token** (optional) — For private GitHub repository context
 - **GitLab Token** (optional) — For private GitLab repository context
@@ -274,9 +275,8 @@ TicketCraft/
 
 ## Available Gemini Models
 
-- **Gemini 3.5 Flash** (`gemini-3.5-flash`) — fast and capable, default
-- **Gemini 3.1 Pro** (`gemini-3.1-pro-preview`) — highest quality
-- **Gemini 3.1 Flash-Lite** (`gemini-3.1-flash-lite`) — faster, lower cost
+- **Gemini 3.8 Flash** (`gemini-3.8-flash`) — most capable Flash model, default
+- **Gemini 3.7 Flash** (`gemini-3.7-flash`) — previous-generation Flash model
 
 ## License
 

@@ -6,7 +6,7 @@ import fsp from 'fs/promises';
 import { usageTracker } from './server/src/services/usage/UsageTracker.ts';
 import { ExportController } from './server/src/controllers/export.controller.ts';
 import { AppError } from './server/src/middleware/errorHandler.ts';
-import { api, clearApiCredentials } from './client/src/services/apiClient.ts';
+import { api, clearApiCredentials, setApiCredentials } from './client/src/services/apiClient.ts';
 import { RepoService } from './server/src/services/repo/RepoService.ts';
 import { RepoController } from './server/src/controllers/repo.controller.ts';
 import { logBuffer } from './server/src/services/logging/LogBuffer.ts';
@@ -350,6 +350,174 @@ test('logBuffer.query with date filter does not call readRetention twice', { con
   }
 });
 
+// ─── Per-user Gemini API key at login ───────────────────────────────────────
+test('apiClient sends X-Gemini-Api-Key when credentials include geminiApiKey', { concurrency: false }, async () => {
+  setApiCredentials({
+    geminiModel: 'gemini-3.8-flash',
+    jiraEmail: 'a@b.com',
+    jiraApiToken: 'tok',
+    geminiApiKey: 'AIza-user-key',
+  });
+  let seenHeaders: Record<string, string> = {};
+  const restoreFetch = withMockFetch((async (_input, init) => {
+    seenHeaders = (init?.headers || {}) as Record<string, string>;
+    return jsonResponse({ success: true, data: {} });
+  }) as typeof fetch);
+
+  try {
+    await api.session.getConfig();
+    assert.equal(seenHeaders['X-Gemini-Api-Key'], 'AIza-user-key');
+  } finally {
+    restoreFetch();
+    clearApiCredentials();
+  }
+});
+
+test('apiClient uploadFiles sends X-Gemini-Api-Key when credentials include geminiApiKey', { concurrency: false }, async () => {
+  setApiCredentials({
+    geminiModel: 'gemini-3.8-flash',
+    jiraEmail: 'a@b.com',
+    jiraApiToken: 'tok',
+    geminiApiKey: 'AIza-upload-key',
+  });
+  let seenHeaders: Record<string, string> = {};
+  const restoreFetch = withMockFetch((async (_input, init) => {
+    seenHeaders = (init?.headers || {}) as Record<string, string>;
+    return jsonResponse({ success: true, data: [] });
+  }) as typeof fetch);
+
+  try {
+    const fakeFile = new File(['test content'], 'test.txt', { type: 'text/plain' });
+    await api.repo.uploadFiles([fakeFile]);
+    assert.equal(seenHeaders['X-Gemini-Api-Key'], 'AIza-upload-key');
+  } finally {
+    restoreFetch();
+    clearApiCredentials();
+  }
+});
+
+function mockExpressRes() {
+  const res: {
+    statusCode?: number;
+    body?: unknown;
+    status: (code: number) => typeof res;
+    json: (body: unknown) => typeof res;
+  } = {
+    status(code: number) {
+      res.statusCode = code;
+      return res;
+    },
+    json(body: unknown) {
+      res.body = body;
+      return res;
+    },
+  };
+  return res;
+}
+
+test('credentialExtractor prefers X-Gemini-Api-Key over env fallback', { concurrency: false }, async () => {
+  const { credentialExtractor } = await import('./server/src/middleware/credentialExtractor.ts');
+  const { config } = await import('./server/src/config/index.ts');
+  const gemini = config.gemini as { apiKey: string };
+  const original = gemini.apiKey;
+  gemini.apiKey = 'env-fallback-key';
+
+  try {
+    const req = {
+      headers: {
+        'x-jira-email': 'a@b.com',
+        'x-jira-token': 'tok',
+        'x-gemini-api-key': 'user-header-key',
+      },
+    } as never;
+    const res = mockExpressRes();
+    let nextCalled = false;
+    credentialExtractor(req, res as never, () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
+    assert.equal((req as { credentials: { geminiApiKey: string } }).credentials.geminiApiKey, 'user-header-key');
+  } finally {
+    gemini.apiKey = original;
+  }
+});
+
+test('credentialExtractor uses env key when header is absent', { concurrency: false }, async () => {
+  const { credentialExtractor } = await import('./server/src/middleware/credentialExtractor.ts');
+  const { config } = await import('./server/src/config/index.ts');
+  const gemini = config.gemini as { apiKey: string };
+  const original = gemini.apiKey;
+  gemini.apiKey = 'env-only-key';
+
+  try {
+    const req = {
+      headers: {
+        'x-jira-email': 'a@b.com',
+        'x-jira-token': 'tok',
+      },
+    } as never;
+    const res = mockExpressRes();
+    let nextCalled = false;
+    credentialExtractor(req, res as never, () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
+    assert.equal((req as { credentials: { geminiApiKey: string } }).credentials.geminiApiKey, 'env-only-key');
+  } finally {
+    gemini.apiKey = original;
+  }
+});
+
+test('credentialExtractor errors when Gemini key is missing from header and env', { concurrency: false }, async () => {
+  const { credentialExtractor } = await import('./server/src/middleware/credentialExtractor.ts');
+  const { config } = await import('./server/src/config/index.ts');
+  const gemini = config.gemini as { apiKey: string };
+  const original = gemini.apiKey;
+  gemini.apiKey = '';
+
+  try {
+    const req = {
+      headers: {
+        'x-jira-email': 'a@b.com',
+        'x-jira-token': 'tok',
+      },
+    } as never;
+    const res = mockExpressRes();
+    let nextCalled = false;
+    credentialExtractor(req, res as never, () => { nextCalled = true; });
+    assert.equal(nextCalled, false);
+    assert.equal(res.statusCode, 401);
+    const body = res.body as { success: boolean; error: { code: string; details: string } };
+    assert.equal(body.error.code, 'MISSING_CREDENTIALS');
+    assert.match(body.error.details, /Gemini API key is required \(X-Gemini-Api-Key or GEMINI_API_KEY\)/);
+  } finally {
+    gemini.apiKey = original;
+  }
+});
+
+test('credentialExtractor treats whitespace-only env Gemini key as missing', { concurrency: false }, async () => {
+  const { credentialExtractor } = await import('./server/src/middleware/credentialExtractor.ts');
+  const { config } = await import('./server/src/config/index.ts');
+  const gemini = config.gemini as { apiKey: string };
+  const original = gemini.apiKey;
+  gemini.apiKey = '   ';
+
+  try {
+    const req = {
+      headers: {
+        'x-jira-email': 'a@b.com',
+        'x-jira-token': 'tok',
+      },
+    } as never;
+    const res = mockExpressRes();
+    let nextCalled = false;
+    credentialExtractor(req, res as never, () => { nextCalled = true; });
+    assert.equal(nextCalled, false);
+    assert.equal(res.statusCode, 401);
+    const body = res.body as { success: boolean; error: { code: string; details: string } };
+    assert.equal(body.error.code, 'MISSING_CREDENTIALS');
+    assert.match(body.error.details, /Gemini API key is required \(X-Gemini-Api-Key or GEMINI_API_KEY\)/);
+  } finally {
+    gemini.apiKey = original;
+  }
+});
+
 // ─── Bug 14: verifiedCache prune timer exists ───────────────────────────────
 test('credentialExtractor verifiedCache has a prune timer', { concurrency: false }, async () => {
   const mod = await import('./server/src/middleware/credentialExtractor.ts');
@@ -457,7 +625,7 @@ test('Ticket type already contains linkedTickets from getTicket', { concurrency:
 // ─── Bug 20: GeminiAdapter.formatTicketForPrompt includes ticket.linkedTickets ─
 test('GeminiAdapter.formatTicketForPrompt includes ticket own linkedTickets when no param', { concurrency: false }, async () => {
   const { GeminiAdapter } = await import('./server/src/services/ai/GeminiAdapter.ts');
-  const adapter = new GeminiAdapter('fake-key', 'gemini-3.1-pro-preview');
+  const adapter = new GeminiAdapter('fake-key', 'gemini-3.8-flash');
   const formatFn = (adapter as unknown as {
     formatTicketForPrompt: (ticket: unknown, linkedTickets?: unknown[]) => string;
   }).formatTicketForPrompt.bind(adapter);
@@ -494,7 +662,7 @@ test('GeminiAdapter.scoreTicket prompt includes linked tickets when provided', {
 
   try {
     const { GeminiAdapter } = await import('./server/src/services/ai/GeminiAdapter.ts');
-    const adapter = new GeminiAdapter('fake-key', 'gemini-3.1-pro-preview');
+    const adapter = new GeminiAdapter('fake-key', 'gemini-3.8-flash');
     const ticket = {
       key: 'TRADE-1', id: '1', issueType: 'Story', summary: 'Trade calc',
       description: 'Description', status: 'Open', priority: null,
@@ -566,7 +734,7 @@ test('logBuffer.query does not trigger readdirSync via pruneOldFiles', { concurr
 // ─── Bug 24: parseJson preserves triple backticks inside JSON string values ──
 test('GeminiAdapter.parseJson preserves code fences inside JSON content', { concurrency: false }, async () => {
   const { GeminiAdapter } = await import('./server/src/services/ai/GeminiAdapter.ts');
-  const adapter = new GeminiAdapter('fake-key', 'gemini-3.1-pro-preview');
+  const adapter = new GeminiAdapter('fake-key', 'gemini-3.8-flash');
   const parseFn = (adapter as unknown as {
     parseJson: <T>(text: string) => T;
   }).parseJson.bind(adapter);
@@ -747,7 +915,7 @@ test('GeminiAdapter.generateContent reports safety blocks with specific error', 
 
   try {
     const { GeminiAdapter } = await import('./server/src/services/ai/GeminiAdapter.ts');
-    const adapter = new GeminiAdapter('fake-key', 'gemini-3.1-pro-preview');
+    const adapter = new GeminiAdapter('fake-key', 'gemini-3.8-flash');
     await assert.rejects(
       adapter.scoreTicket({
         id: '1', key: 'TEST-1', summary: 'Test', description: 'Desc', status: 'Open',
@@ -866,7 +1034,7 @@ test('GeminiAdapter throws GEMINI_TRUNCATED when finishReason is MAX_TOKENS with
 
   try {
     const { GeminiAdapter } = await import('./server/src/services/ai/GeminiAdapter.ts');
-    const adapter = new GeminiAdapter('fake-key', 'gemini-3.1-pro-preview');
+    const adapter = new GeminiAdapter('fake-key', 'gemini-3.8-flash');
     await assert.rejects(
       adapter.scoreTicket({
         id: '1', key: 'TEST-1', summary: 'Test', description: 'Desc', status: 'Open',
@@ -916,4 +1084,90 @@ test('McpAgent uses config.provider for log entries and stats', { concurrency: f
     agentSrc.includes("provider?: 'github' | 'gitlab'"),
     'McpAgentConfig should have a provider field',
   );
+});
+
+test('validateApiKey sends x-goog-api-key and does not put the key in the URL', { concurrency: false }, async () => {
+  let seenUrl = '';
+  let seenKeyHeader: string | undefined;
+  const restoreFetch = withMockFetch((async (input, init) => {
+    seenUrl = String(input);
+    const headers = (init?.headers || {}) as Record<string, string>;
+    seenKeyHeader = headers['x-goog-api-key'];
+    return jsonResponse({ models: [] });
+  }) as typeof fetch);
+
+  try {
+    const { GeminiAdapter } = await import('./server/src/services/ai/GeminiAdapter.ts');
+    const adapter = new GeminiAdapter('user-secret-key', 'gemini-3.8-flash');
+    await adapter.validateApiKey();
+    assert.equal(seenKeyHeader, 'user-secret-key');
+    assert.equal(seenUrl.includes('key='), false);
+    assert.ok(seenUrl.includes('/models'), `expected /models URL, got ${seenUrl}`);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('validateApiKey maps 401 to GEMINI_AUTH_FAILED', { concurrency: false }, async () => {
+  const restoreFetch = withMockFetch((async () =>
+    new Response('denied', { status: 401 })) as typeof fetch);
+
+  try {
+    const { GeminiAdapter } = await import('./server/src/services/ai/GeminiAdapter.ts');
+    const adapter = new GeminiAdapter('bad-key', 'gemini-3.8-flash');
+    await assert.rejects(
+      () => adapter.validateApiKey(),
+      (err: unknown) => {
+        const e = err as { code?: string; message?: string };
+        assert.equal(e.code, 'GEMINI_AUTH_FAILED');
+        assert.equal(e.message, 'Gemini API key is invalid.');
+        return true;
+      },
+    );
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('validateApiKey maps 429 to GEMINI_API_ERROR', { concurrency: false }, async () => {
+  const restoreFetch = withMockFetch((async () =>
+    new Response('slow down', { status: 429 })) as typeof fetch);
+
+  try {
+    const { GeminiAdapter } = await import('./server/src/services/ai/GeminiAdapter.ts');
+    const adapter = new GeminiAdapter('ok-key', 'gemini-3.8-flash');
+    await assert.rejects(
+      () => adapter.validateApiKey(),
+      (err: unknown) => {
+        const e = err as { code?: string; message?: string };
+        assert.equal(e.code, 'GEMINI_API_ERROR');
+        assert.match(e.message ?? '', /rate limit/i);
+        return true;
+      },
+    );
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('validateApiKey maps network failure to GEMINI_UNAVAILABLE', { concurrency: false }, async () => {
+  const restoreFetch = withMockFetch((async () => {
+    throw new TypeError('fetch failed');
+  }) as typeof fetch);
+
+  try {
+    const { GeminiAdapter } = await import('./server/src/services/ai/GeminiAdapter.ts');
+    const adapter = new GeminiAdapter('ok-key', 'gemini-3.8-flash');
+    await assert.rejects(
+      () => adapter.validateApiKey(),
+      (err: unknown) => {
+        const e = err as { code?: string; message?: string };
+        assert.equal(e.code, 'GEMINI_UNAVAILABLE');
+        assert.match(e.message ?? '', /Could not reach Gemini/);
+        return true;
+      },
+    );
+  } finally {
+    restoreFetch();
+  }
 });

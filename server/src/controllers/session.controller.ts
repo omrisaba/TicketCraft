@@ -6,13 +6,14 @@ import { JiraClient } from '../services/jira/JiraClient.js';
 import { GeminiAdapter } from '../services/ai/GeminiAdapter.js';
 import { AdminStore } from '../services/admin/AdminStore.js';
 import { usageTracker } from '../services/usage/UsageTracker.js';
+import { AppError } from '../middleware/errorHandler.js';
 
 const VALID_MODEL_IDS = new Set<string>(AVAILABLE_MODELS.map((m: { id: string }) => m.id));
 
 export class SessionController {
   validate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { jiraEmail, jiraApiToken, geminiModel } = req.body;
+      const { jiraEmail, jiraApiToken, geminiModel, geminiApiKey } = req.body;
 
       const errors: string[] = [];
 
@@ -20,6 +21,12 @@ export class SessionController {
       if (!jiraApiToken?.trim()) errors.push('Jira API token is required');
       if (geminiModel && !VALID_MODEL_IDS.has(geminiModel)) {
         errors.push(`Invalid model: ${geminiModel}`);
+      }
+
+      const userGeminiKey = typeof geminiApiKey === 'string' ? geminiApiKey.trim() : '';
+      const resolvedGeminiKey = userGeminiKey || config.gemini.apiKey.trim();
+      if (!resolvedGeminiKey) {
+        errors.push('Gemini API key is required');
       }
 
       if (errors.length > 0) {
@@ -47,6 +54,18 @@ export class SessionController {
         };
       } catch {
         validationErrors.push('Jira authentication failed. Check your email and API token.');
+      }
+
+      try {
+        const model = (geminiModel as GeminiModel) || (config.gemini.defaultModel as GeminiModel);
+        const adapter = new GeminiAdapter(resolvedGeminiKey, model);
+        await adapter.validateApiKey();
+      } catch (err) {
+        if (err instanceof AppError) {
+          validationErrors.push(err.message);
+        } else {
+          validationErrors.push('Could not reach Gemini to verify the API key.');
+        }
       }
 
       const valid = validationErrors.length === 0;
@@ -83,6 +102,7 @@ export class SessionController {
           gitlabMcpConfigured: !!adminSettings.gitlabMcpUrl,
           cursorEnabled: adminSettings.cursorEnabled,
           adminPortalEnabled: !!(process.env.ADMIN_EMAILS || '').trim(),
+          geminiServerKeyConfigured: !!config.gemini.apiKey.trim(),
         },
       });
     } catch (err) {

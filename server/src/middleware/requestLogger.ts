@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 
 const SENSITIVE_HEADERS = new Set([
   'x-gemini-key',
+  'x-gemini-api-key',
   'x-jira-token',
   'authorization',
   'cookie',

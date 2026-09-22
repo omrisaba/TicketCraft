@@ -13,6 +13,7 @@ type LoginTab = 'manual' | 'file';
 const CREDENTIAL_TEMPLATE = {
   jiraEmail: 'you@company.com',
   jiraApiToken: 'your-jira-api-token',
+  geminiApiKey: '',
   githubToken: '',
   gitlabToken: '',
   cursorApiKey: '',
@@ -37,6 +38,7 @@ export function SessionStart() {
   const [loginTab, setLoginTab] = useState<LoginTab>('manual');
   const [jiraEmail, setJiraEmail] = useState('');
   const [jiraApiToken, setJiraApiToken] = useState('');
+  const [geminiApiKey, setGeminiApiKey] = useState('');
   const [githubToken, setGithubToken] = useState('');
   const [gitlabToken, setGitlabToken] = useState('');
   const [cursorApiKey, setCursorApiKey] = useState('');
@@ -86,8 +88,14 @@ export function SessionStart() {
           setError('File must contain at least "jiraEmail" and "jiraApiToken".');
           return;
         }
+        const geminiFromFile = typeof parsed.geminiApiKey === 'string' ? parsed.geminiApiKey.trim() : '';
+        if (!appConfig?.geminiServerKeyConfigured && !geminiFromFile) {
+          setError('Gemini API key is required.');
+          return;
+        }
         setJiraEmail(parsed.jiraEmail || '');
         setJiraApiToken(parsed.jiraApiToken || '');
+        setGeminiApiKey(geminiFromFile);
         setGithubToken(parsed.githubToken || '');
         setGitlabToken(parsed.gitlabToken || '');
         setCursorApiKey(parsed.cursorApiKey || '');
@@ -111,11 +119,18 @@ export function SessionStart() {
       return;
     }
 
+    if (!appConfig.geminiServerKeyConfigured && !geminiApiKey.trim()) {
+      setError('Gemini API key is required.');
+      setLoading(false);
+      return;
+    }
+
     try {
       const result = await api.session.validate({
         geminiModel: geminiModel || appConfig.defaultModel,
         jiraEmail,
         jiraApiToken,
+        ...(geminiApiKey.trim() && { geminiApiKey: geminiApiKey.trim() }),
       }) as any;
 
       if (!result.valid) {
@@ -128,6 +143,7 @@ export function SessionStart() {
         geminiModel: (geminiModel || appConfig.defaultModel) as GeminiModel,
         jiraEmail,
         jiraApiToken,
+        ...(geminiApiKey.trim() && { geminiApiKey: geminiApiKey.trim() }),
         ...(githubToken.trim() && { githubToken: githubToken.trim() }),
         ...(gitlabToken.trim() && { gitlabToken: gitlabToken.trim() }),
         ...(cursorApiKey.trim() && { cursorApiKey: cursorApiKey.trim() }),
@@ -275,6 +291,36 @@ export function SessionStart() {
                 </div>
 
                 <div className="border-t border-gray-200 pt-3 space-y-3">
+                  <h2 className="text-lg font-semibold text-gray-800">Gemini API Key
+                    {appConfig?.geminiServerKeyConfigured && (
+                      <span className="text-xs font-normal text-gray-400 ml-2">optional</span>
+                    )}
+                  </h2>
+                  <Input
+                    label="Gemini API Key"
+                    isSecret
+                    placeholder="AIza..."
+                    value={geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                    required={!appConfig?.geminiServerKeyConfigured}
+                  />
+                  <p className="text-[11px] text-gray-400">
+                    {appConfig?.geminiServerKeyConfigured
+                      ? 'Optional. Overrides the server default key for this session. '
+                      : 'Required. '}
+                    Get your key from{' '}
+                    <a
+                      href="https://aistudio.google.com/apikey"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-500 hover:underline"
+                    >
+                      Google AI Studio
+                    </a>.
+                  </p>
+                </div>
+
+                <div className="border-t border-gray-200 pt-3 space-y-3">
                   <h2 className="text-lg font-semibold text-gray-800">Repository Tokens
                     <span className="text-xs font-normal text-gray-400 ml-2">optional</span>
                   </h2>
@@ -336,6 +382,8 @@ export function SessionStart() {
                   <span className="text-gray-800 truncate">{jiraEmail}</span>
                   <span className="text-gray-500">Jira Token</span>
                   <span className="text-gray-800">{jiraApiToken ? '••••••••' : '(empty)'}</span>
+                  <span className="text-gray-500">Gemini API Key</span>
+                  <span className="text-gray-800">{geminiApiKey ? '••••••••' : '(not set)'}</span>
                   <span className="text-gray-500">GitHub Token</span>
                   <span className="text-gray-800">{githubToken ? '••••••••' : '(not set)'}</span>
                   <span className="text-gray-500">GitLab Token</span>
