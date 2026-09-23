@@ -101,6 +101,14 @@ tls:
   # Name of a secret containing tls.crt and tls.key
   secretName: "ticketcraft-tls-certs"
 
+# Additional CA bundle used to validate outbound TLS connections (for example,
+# an internal GitLab server). Disabled by default for portable deployments.
+trustedCA:
+  enabled: false
+  configMapName: ""
+  key: "ca-bundle.crt"
+  mountPath: "/etc/ticketcraft/trusted-ca"
+
 # Persistent storage for drafts, history, automation results, admin settings
 persistence:
   enabled: true

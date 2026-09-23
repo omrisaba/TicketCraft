@@ -6,7 +6,7 @@ replicaCount: 1
 image:
   repository: images.paas.redhat.com/unifai/ticketcraft
   pullPolicy: Always
-  tag: "latest"
+  tag: "23-09-26"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -61,6 +61,14 @@ envSecret:
 
 tls:
   enabled: false
+
+# The namespace-provided Red Hat CA bundle includes the CA for the internal
+# GitLab instance. It is used by both Node.js fetch calls and git clones.
+trustedCA:
+  enabled: true
+  configMapName: "redhat-ca-bundle"
+  key: "ca-bundle.crt"
+  mountPath: "/etc/ticketcraft/trusted-ca"
 
 persistence:
   enabled: true

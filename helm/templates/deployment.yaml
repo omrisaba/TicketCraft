@@ -92,6 +92,14 @@ spec:
             - name: TLS_KEY_PATH
               value: "/app/server/certs/tls.key"
             {{- end }}
+            {{- if .Values.trustedCA.enabled }}
+            # Node.js does not automatically read arbitrary mounted CA bundles.
+            - name: NODE_EXTRA_CA_CERTS
+              value: "{{ .Values.trustedCA.mountPath }}/{{ .Values.trustedCA.key }}"
+            # RepoCloneStore invokes git directly, which needs the same bundle.
+            - name: GIT_SSL_CAINFO
+              value: "{{ .Values.trustedCA.mountPath }}/{{ .Values.trustedCA.key }}"
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
@@ -104,6 +112,11 @@ spec:
             {{- if .Values.tls.enabled }}
             - name: tls-certs
               mountPath: /app/server/certs
+              readOnly: true
+            {{- end }}
+            {{- if .Values.trustedCA.enabled }}
+            - name: trusted-ca
+              mountPath: {{ .Values.trustedCA.mountPath }}
               readOnly: true
             {{- end }}
       volumes:
@@ -119,6 +132,14 @@ spec:
         - name: tls-certs
           secret:
             secretName: {{ .Values.tls.secretName }}
+        {{- end }}
+        {{- if .Values.trustedCA.enabled }}
+        - name: trusted-ca
+          configMap:
+            name: {{ .Values.trustedCA.configMapName }}
+            items:
+              - key: {{ .Values.trustedCA.key }}
+                path: {{ .Values.trustedCA.key }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
