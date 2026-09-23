@@ -75,6 +75,8 @@ env:
   GEMINI_DEFAULT_MODEL: "gemini-3.8-flash"
   # Jira Cloud base URL (required)
   JIRA_BASE_URL: ""
+  # Optional Jira custom field for Acceptance Criteria (auto-detected by name if empty)
+  JIRA_ACCEPTANCE_CRITERIA_FIELD: ""
   # Server ports
   PORT: "3001"
   HTTP_PORT: "3000"

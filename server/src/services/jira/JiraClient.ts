@@ -4,14 +4,21 @@ import { AppError } from '../../middleware/errorHandler.js';
 import TurndownService from 'turndown';
 import { markdownToJiraAdf } from './adf.js';
 
+type AcField = { id: string; format: 'adf' | 'text' };
+
 export class JiraClient implements IssueTracker {
   private baseUrl: string;
   private authHeader: string;
   private static readonly storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10016';
+  private static readonly acFieldByHost = new Map<string, AcField | null>();
 
   constructor(baseUrl: string, email: string, apiToken: string) {
     this.baseUrl = baseUrl;
     this.authHeader = 'Basic ' + Buffer.from(`${email}:${apiToken}`).toString('base64');
+  }
+
+  static resetAcFieldCache(): void {
+    JiraClient.acFieldByHost.clear();
   }
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -52,20 +59,24 @@ export class JiraClient implements IssueTracker {
   }
 
   async getTicket(ticketKey: string): Promise<Ticket> {
+    const acField = await this.resolveAcceptanceCriteriaField();
+    const acFieldQuery = acField ? `,${acField.id}` : '';
     const data = await this.request<any>(
-      `/issue/${ticketKey}?expand=renderedFields&fields=summary,description,status,priority,assignee,reporter,labels,${JiraClient.storyPointsField},issuetype,issuelinks,attachment,comment,created,updated,parent,subtasks`,
+      `/issue/${ticketKey}?expand=renderedFields&fields=summary,description,status,priority,assignee,reporter,labels,${JiraClient.storyPointsField}${acFieldQuery},issuetype,issuelinks,attachment,comment,created,updated,parent,subtasks`,
     );
 
     const fields = data.fields;
     const rendered = data.renderedFields || {};
 
     const renderedComments = rendered.comment?.comments || [];
+    const descriptionMarkdown = this.htmlToMarkdown(rendered.description) || this.extractTextFallback(fields.description);
+    const acceptanceCriteria = this.extractAcceptanceCriteriaValue(fields, rendered, acField, descriptionMarkdown);
 
     return {
       id: data.id,
       key: data.key,
       summary: fields.summary || '',
-      description: JiraClient.extractDescription(this.htmlToMarkdown(rendered.description) || this.extractTextFallback(fields.description)),
+      description: JiraClient.extractDescription(descriptionMarkdown),
       status: fields.status?.name || 'Unknown',
       priority: fields.priority?.name || null,
       assignee: fields.assignee?.displayName || null,
@@ -74,7 +85,7 @@ export class JiraClient implements IssueTracker {
       labels: fields.labels || [],
       storyPoints: fields[JiraClient.storyPointsField] ?? null,
       issueType: fields.issuetype?.name || 'Task',
-      acceptanceCriteria: JiraClient.extractAcceptanceCriteria(this.htmlToMarkdown(rendered.description) || this.extractTextFallback(fields.description)),
+      acceptanceCriteria,
       parent: fields.parent ? {
         key: fields.parent.key,
         summary: fields.parent.fields?.summary || '',
@@ -132,6 +143,8 @@ export class JiraClient implements IssueTracker {
 
     const hasDescription = changes.description !== undefined;
     const hasAc = changes.acceptanceCriteria !== undefined && changes.acceptanceCriteria !== null;
+    const acField = (hasDescription || hasAc) ? await this.resolveAcceptanceCriteriaField() : null;
+    let descriptionForFallback = '';
     if (hasDescription || hasAc) {
       let baseDescription: string;
       if (hasDescription) {
@@ -140,14 +153,17 @@ export class JiraClient implements IssueTracker {
         const existing = await this.getTicket(ticketKey);
         baseDescription = existing.description ?? '';
       }
-      baseDescription = JiraClient.stripAcceptanceCriteriaSection(baseDescription);
+      const stripped = JiraClient.stripAcceptanceCriteriaSection(baseDescription);
       const ac = hasAc ? changes.acceptanceCriteria : undefined;
-      let fullDescription = baseDescription;
-      if (ac) {
-        fullDescription += `\n\n## Acceptance Criteria\n\n${ac}`;
-      }
-      if (fullDescription.trim()) {
-        updateFields.description = this.textToAdf(fullDescription);
+      descriptionForFallback = ac ? `${stripped}\n\n## Acceptance Criteria\n\n${ac}` : stripped;
+
+      if (acField && hasAc) {
+        updateFields[acField.id] = this.formatAcValue(ac ?? '', acField);
+        if (hasDescription || stripped !== baseDescription.trim()) {
+          if (stripped.trim()) updateFields.description = this.textToAdf(stripped);
+        }
+      } else if (descriptionForFallback.trim()) {
+        updateFields.description = this.textToAdf(descriptionForFallback);
       }
     }
 
@@ -159,10 +175,25 @@ export class JiraClient implements IssueTracker {
       updateFields[JiraClient.storyPointsField] = changes.storyPoints;
     }
 
-    await this.request(`/issue/${ticketKey}`, {
-      method: 'PUT',
-      body: JSON.stringify({ fields: updateFields }),
-    });
+    try {
+      await this.request(`/issue/${ticketKey}`, {
+        method: 'PUT',
+        body: JSON.stringify({ fields: updateFields }),
+      });
+    } catch (err) {
+      if (acField && hasAc && this.isMissingScreenField(err, acField.id)) {
+        delete updateFields[acField.id];
+        if (descriptionForFallback.trim()) {
+          updateFields.description = this.textToAdf(descriptionForFallback);
+        }
+        await this.request(`/issue/${ticketKey}`, {
+          method: 'PUT',
+          body: JSON.stringify({ fields: updateFields }),
+        });
+        return;
+      }
+      throw err;
+    }
   }
 
   async uploadAttachment(ticketKey: string, file: Buffer, filename: string, mimeType: string): Promise<void> {
@@ -207,9 +238,13 @@ export class JiraClient implements IssueTracker {
 
     if (opts.changes.summary) fields.summary = opts.changes.summary;
 
-    let fullDescription = opts.changes.description ?? '';
-    if (opts.changes.acceptanceCriteria) {
-      fullDescription += `\n\n## Acceptance Criteria\n\n${opts.changes.acceptanceCriteria}`;
+    const acField = await this.resolveAcceptanceCriteriaField();
+    let fullDescription = JiraClient.stripAcceptanceCriteriaSection(opts.changes.description ?? '');
+    const acText = opts.changes.acceptanceCriteria?.trim() || '';
+    if (acField && acText) {
+      fields[acField.id] = this.formatAcValue(acText, acField);
+    } else if (acText) {
+      fullDescription += `\n\n## Acceptance Criteria\n\n${acText}`;
     }
     if (fullDescription.trim()) {
       fields.description = this.textToAdf(fullDescription);
@@ -220,12 +255,25 @@ export class JiraClient implements IssueTracker {
     if (opts.parentKey) fields.parent = { key: opts.parentKey };
     if (opts.assigneeAccountId) fields.assignee = { accountId: opts.assigneeAccountId };
 
-    const data = await this.request<any>('/issue', {
-      method: 'POST',
-      body: JSON.stringify({ fields }),
-    });
-
-    return { key: data.key, id: data.id };
+    try {
+      const data = await this.request<any>('/issue', {
+        method: 'POST',
+        body: JSON.stringify({ fields }),
+      });
+      return { key: data.key, id: data.id };
+    } catch (err) {
+      if (acField && acText && this.isMissingScreenField(err, acField.id)) {
+        delete fields[acField.id];
+        const fallback = `${fullDescription}\n\n## Acceptance Criteria\n\n${acText}`;
+        fields.description = this.textToAdf(fallback);
+        const data = await this.request<any>('/issue', {
+          method: 'POST',
+          body: JSON.stringify({ fields }),
+        });
+        return { key: data.key, id: data.id };
+      }
+      throw err;
+    }
   }
 
   async linkTickets(inwardKey: string, outwardKey: string, linkType = 'Relates'): Promise<void> {
@@ -366,6 +414,92 @@ export class JiraClient implements IssueTracker {
         },
       }),
     });
+  }
+
+  private acFieldCacheKey(): string {
+    const envId = (process.env.JIRA_ACCEPTANCE_CRITERIA_FIELD || '').trim().toLowerCase();
+    return `${this.baseUrl}::${envId}`;
+  }
+
+  private static isAdfCustomField(schema: { type?: string; custom?: string } | undefined): boolean {
+    const type = String(schema?.type || '');
+    const custom = String(schema?.custom || '');
+    if (type === 'doc') return true;
+    return /textarea|rich-text|richtext|atlassian-document|adf/i.test(custom);
+  }
+
+  private pickAcceptanceCriteriaField(fields: any[]): AcField | null {
+    const envId = (process.env.JIRA_ACCEPTANCE_CRITERIA_FIELD || '').trim();
+    if (envId && /^(none|off|false|description)$/i.test(envId)) return null;
+
+    const named = fields.filter((f) =>
+      typeof f?.name === 'string' && /^acceptance\s*criteria$/i.test(f.name.trim()),
+    );
+
+    let chosen = envId ? fields.find((f) => f.id === envId) : undefined;
+    if (!chosen) chosen = named.find((f) => JiraClient.isAdfCustomField(f.schema)) || named[0];
+
+    if (envId && /^customfield_\d+$/i.test(envId) && !chosen) {
+      return { id: envId, format: 'adf' };
+    }
+    if (!chosen?.id) return null;
+
+    return {
+      id: chosen.id,
+      format: JiraClient.isAdfCustomField(chosen.schema) ? 'adf' : 'text',
+    };
+  }
+
+  private async resolveAcceptanceCriteriaField(): Promise<AcField | null> {
+    const key = this.acFieldCacheKey();
+    if (JiraClient.acFieldByHost.has(key)) return JiraClient.acFieldByHost.get(key) ?? null;
+
+    const envId = (process.env.JIRA_ACCEPTANCE_CRITERIA_FIELD || '').trim();
+    if (envId && /^(none|off|false|description)$/i.test(envId)) {
+      JiraClient.acFieldByHost.set(key, null);
+      return null;
+    }
+
+    let resolved: AcField | null = null;
+    try {
+      const fields = await this.request<any[]>('/field');
+      resolved = this.pickAcceptanceCriteriaField(Array.isArray(fields) ? fields : []);
+    } catch {
+      resolved = envId && /^customfield_\d+$/i.test(envId) ? { id: envId, format: 'adf' } : null;
+    }
+
+    JiraClient.acFieldByHost.set(key, resolved);
+    return resolved;
+  }
+
+  private formatAcValue(text: string, field: AcField): unknown {
+    return field.format === 'text' ? text : this.textToAdf(text);
+  }
+
+  private extractAcceptanceCriteriaValue(
+    fields: Record<string, unknown>,
+    rendered: Record<string, unknown>,
+    acField: AcField | null,
+    descriptionMarkdown: string | null,
+  ): string | null {
+    if (acField) {
+      const renderedAc = this.htmlToMarkdown(rendered[acField.id] as string | undefined);
+      const rawAc = this.extractTextFallback(fields[acField.id]);
+      const fromField = renderedAc || rawAc;
+      if (fromField?.trim()) return fromField.trim();
+    }
+    return JiraClient.extractAcceptanceCriteria(descriptionMarkdown);
+  }
+
+  private isMissingScreenField(err: unknown, fieldId: string): boolean {
+    if (!(err instanceof AppError) || !err.details) return false;
+    try {
+      const parsed = JSON.parse(err.details);
+      const msg = parsed?.errors?.[fieldId];
+      return typeof msg === 'string' && /not on the appropriate screen|unknown/i.test(msg);
+    } catch {
+      return typeof err.details === 'string' && err.details.includes(fieldId) && /not on the appropriate screen/i.test(err.details);
+    }
   }
 
   private static readonly AC_HEADING_RE = /\n{0,3}#{1,3}\s*Acceptance\s+Criteria\s*\n/i;

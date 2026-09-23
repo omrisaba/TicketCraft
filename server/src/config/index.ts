@@ -33,6 +33,8 @@ export const config = {
 
   jira: {
     baseUrl: process.env.JIRA_BASE_URL || '',
+    storyPointsField: process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10016',
+    acceptanceCriteriaField: (process.env.JIRA_ACCEPTANCE_CRITERIA_FIELD || '').trim(),
   },
 
   automation: {

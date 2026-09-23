@@ -149,6 +149,8 @@ TicketCraft stores drafts, session history, automation profiles, and admin setti
 | TLS_CERT_PATH | (empty) | Path to TLS certificate file. When set with TLS_KEY_PATH, enables HTTPS. |
 | TLS_KEY_PATH | (empty) | Path to TLS private key file. |
 | GEMINI_DEFAULT_MODEL | gemini-3.8-flash | Default Gemini model. Users can override per session. |
+| JIRA_BASE_URL | (required) | Jira Cloud instance URL. |
+| JIRA_ACCEPTANCE_CRITERIA_FIELD | (auto) | Optional `customfield_XXXXX` for the dedicated Acceptance Criteria field. Empty = detect by field name. `none` = keep AC in the description. |
 | ADMIN_EMAILS | (empty) | Comma-separated Jira email addresses allowed to access admin endpoints (settings, logs, Cursor config). |
 | SESSION_TIMEOUT_MS | 1800000 | Inactivity timeout in milliseconds (default: 30 minutes). |
 | AUTOMATION_TRIGGER_LABEL | readyForTicketCraftRefinement | Jira label that marks a ticket as ready for automated refinement. |

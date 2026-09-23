@@ -1551,3 +1551,143 @@ test('JiraClient.createTicket sends sanitized ADF for Gemini-style markdown', { 
   }
 });
 
+test('JiraClient.createTicket writes acceptance criteria to the dedicated Jira field', { concurrency: false }, async () => {
+  const { JiraClient } = await import('./server/src/services/jira/JiraClient.ts');
+  JiraClient.resetAcFieldCache();
+  let sentBody: any = null;
+  const restoreFetch = withMockFetch((async (input, init) => {
+    const url = String(input);
+    if (url.endsWith('/rest/api/3/field')) {
+      return jsonResponse([{
+        id: 'customfield_10100',
+        name: 'Acceptance Criteria',
+        schema: { type: 'string', custom: 'com.atlassian.jira.plugin.system.customfieldtypes:textarea' },
+      }]);
+    }
+    if (url.includes('/rest/api/3/issue') && init?.method === 'POST') {
+      sentBody = JSON.parse(init.body as string);
+      return jsonResponse({ key: 'TEST-10', id: '10' });
+    }
+    return new Response('', { status: 404 });
+  }) as typeof fetch);
+
+  try {
+    const client = new JiraClient('https://jira-ac.test', 'user@test.com', 'token');
+    await client.createTicket({
+      projectKey: 'TEST',
+      issueType: 'Story',
+      changes: {
+        summary: 'Dedicated AC field',
+        description: '## User Story\n\nAs a user I can save.\n\n## Scope\n\nAPI only.',
+        acceptanceCriteria: '- [ ] criterion one',
+      },
+    });
+    assert.ok(sentBody?.fields?.customfield_10100, 'AC should be written to the custom field');
+    assert.equal(sentBody.fields.customfield_10100.type, 'doc');
+    const descText = JSON.stringify(sentBody.fields.description);
+    assert.equal(descText.includes('Acceptance Criteria'), false, 'description should not contain a duplicate AC section');
+    assert.ok(descText.includes('User Story'));
+    assert.ok(JSON.stringify(sentBody.fields.customfield_10100).includes('criterion one'));
+  } finally {
+    restoreFetch();
+    JiraClient.resetAcFieldCache();
+  }
+});
+
+test('JiraClient.getTicket reads acceptance criteria from the dedicated field', { concurrency: false }, async () => {
+  const { JiraClient } = await import('./server/src/services/jira/JiraClient.ts');
+  JiraClient.resetAcFieldCache();
+  const restoreFetch = withMockFetch((async (input) => {
+    const url = String(input);
+    if (url.endsWith('/rest/api/3/field')) {
+      return jsonResponse([{
+        id: 'customfield_10100',
+        name: 'Acceptance Criteria',
+        schema: { type: 'string', custom: 'com.atlassian.jira.plugin.system.customfieldtypes:textarea' },
+      }]);
+    }
+    if (url.includes('/rest/api/3/issue/AC-1')) {
+      return jsonResponse({
+        id: '1',
+        key: 'AC-1',
+        fields: {
+          summary: 'Has dedicated AC',
+          status: { name: 'Open' },
+          issuetype: { name: 'Story' },
+          labels: [],
+          attachment: [],
+          comment: { comments: [] },
+          subtasks: [],
+          created: '',
+          updated: '',
+          issuelinks: [],
+          description: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'User story only' }] }] },
+          customfield_10100: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Must login' }] }] },
+        },
+        renderedFields: {
+          description: '<p>User story only</p>',
+          customfield_10100: '<p>Must login</p>',
+        },
+      });
+    }
+    return new Response('', { status: 404 });
+  }) as typeof fetch);
+
+  try {
+    const client = new JiraClient('https://jira-ac-read.test', 'user@test.com', 'token');
+    const ticket = await client.getTicket('AC-1');
+    assert.equal(ticket.acceptanceCriteria, 'Must login');
+    assert.equal(ticket.description, 'User story only');
+  } finally {
+    restoreFetch();
+    JiraClient.resetAcFieldCache();
+  }
+});
+
+test('JiraClient.createTicket falls back to description when AC field is not on the screen', { concurrency: false }, async () => {
+  const { JiraClient } = await import('./server/src/services/jira/JiraClient.ts');
+  JiraClient.resetAcFieldCache();
+  const posts: any[] = [];
+  const restoreFetch = withMockFetch((async (input, init) => {
+    const url = String(input);
+    if (url.endsWith('/rest/api/3/field')) {
+      return jsonResponse([{
+        id: 'customfield_10100',
+        name: 'Acceptance Criteria',
+        schema: { type: 'string', custom: 'com.atlassian.jira.plugin.system.customfieldtypes:textarea' },
+      }]);
+    }
+    if (url.includes('/rest/api/3/issue') && init?.method === 'POST') {
+      const body = JSON.parse(init.body as string);
+      posts.push(body);
+      if (body.fields.customfield_10100) {
+        return new Response(JSON.stringify({
+          errors: { customfield_10100: "Field 'customfield_10100' cannot be set. It is not on the appropriate screen, or unknown." },
+        }), { status: 400, headers: { 'content-type': 'application/json' } });
+      }
+      return jsonResponse({ key: 'TEST-11', id: '11' });
+    }
+    return new Response('', { status: 404 });
+  }) as typeof fetch);
+
+  try {
+    const client = new JiraClient('https://jira-ac-fallback.test', 'user@test.com', 'token');
+    const created = await client.createTicket({
+      projectKey: 'TEST',
+      issueType: 'Task',
+      changes: {
+        summary: 'No AC screen',
+        description: 'Body text',
+        acceptanceCriteria: '- [ ] still store it',
+      },
+    });
+    assert.equal(created.key, 'TEST-11');
+    assert.equal(posts.length, 2);
+    assert.equal(posts[1].fields.customfield_10100, undefined);
+    assert.ok(JSON.stringify(posts[1].fields.description).includes('still store it'));
+  } finally {
+    restoreFetch();
+    JiraClient.resetAcFieldCache();
+  }
+});
+

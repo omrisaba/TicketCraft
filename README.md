@@ -70,6 +70,7 @@ These are set once by the admin and apply to all users:
 |----------|----------|-------------|
 | `GEMINI_API_KEY` | No | Optional shared Gemini API key used when a user does not provide their own at login |
 | `JIRA_BASE_URL` | Yes | Jira instance URL (e.g., `https://yourcompany.atlassian.net`) |
+| `JIRA_ACCEPTANCE_CRITERIA_FIELD` | No | Jira custom field id for Acceptance Criteria (auto-detected by name if empty; `none` = store in description) |
 | `GEMINI_DEFAULT_MODEL` | No | Default model, users can override (default: `gemini-3.8-flash`) |
 | `ADMIN_EMAILS` | No | Comma-separated emails allowed to access admin panel |
 | `SESSION_TIMEOUT_MS` | No | Inactivity timeout in ms (default: `1800000` / 30 min) |

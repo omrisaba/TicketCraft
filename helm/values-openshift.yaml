@@ -42,6 +42,7 @@ env:
   GEMINI_API_KEY: ""
   GEMINI_DEFAULT_MODEL: "gemini-3.8-flash"
   JIRA_BASE_URL: "https://redhat.atlassian.net"
+  JIRA_ACCEPTANCE_CRITERIA_FIELD: ""
   ADMIN_EMAILS: "osabach@redhat.com,yhabushi@redhat.com"
   PORT: "3001"
   HTTP_PORT: "3000"
