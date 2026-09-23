@@ -47,8 +47,11 @@ export class RepoController {
 
       const parsed = RepoService.parseRepoUrl(repoUrl.trim());
       const creds = getCredentials(req);
+      const bodyToken = typeof req.body?.gitlabToken === 'string' ? req.body.gitlabToken : '';
       const authToken =
-        parsed.provider === 'github' ? creds.githubToken : creds.gitlabToken;
+        parsed.provider === 'github'
+          ? creds.githubToken
+          : (bodyToken.trim() || creds.gitlabToken);
       const context = await RepoService.fetchContext(repoUrl.trim(), authToken);
       const promptContext = RepoService.formatContextForPrompt(context);
 
@@ -113,7 +116,7 @@ export class RepoController {
     if (parsed.protocol !== 'https:') {
       throw new AppError(400, 'INVALID_URL', 'Only HTTPS URLs are allowed.');
     }
-    if (!ALLOWED_FETCH_HOSTS.has(parsed.hostname)) {
+    if (!ALLOWED_FETCH_HOSTS.has(parsed.hostname.toLowerCase()) && !RepoService.isGitLabHost(parsed.hostname)) {
       throw new AppError(
         400,
         'BLOCKED_HOST',
@@ -170,7 +173,7 @@ export class RepoController {
     }
     if (
       parsed
-      && parsed.hostname.toLowerCase() === 'gitlab.com'
+      && RepoService.isGitLabHost(parsed.hostname)
       && parsed.pathname.includes('/-/blob/')
     ) {
       const parts = parsed.pathname.split('/').filter(Boolean);
@@ -182,7 +185,7 @@ export class RepoController {
         const filePathRaw = parts.slice(blobIdx + 2).join('/');
         const projectId = encodeURIComponent(namespace);
         const filePath = encodeURIComponent(filePathRaw);
-        return `https://gitlab.com/api/v4/projects/${projectId}/repository/files/${filePath}/raw?ref=${ref}`;
+        return `https://${parsed.hostname}/api/v4/projects/${projectId}/repository/files/${filePath}/raw?ref=${ref}`;
       }
     }
 

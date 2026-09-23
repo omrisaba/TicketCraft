@@ -9,8 +9,9 @@ import type { RepoContext } from 'ticketcraft-shared';
 import { GitBranch, Link2, X, Check, RefreshCw } from 'lucide-react';
 
 export function RepoConnector() {
-  const { repoContext, setRepoContext } = useSession();
+  const { repoContext, setRepoContext, credentials, setGitlabToken } = useSession();
   const [repoUrl, setRepoUrl] = useState('');
+  const [gitlabToken, setGitlabTokenInput] = useState(credentials?.gitlabToken || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const profileChecked = useRef(false);
@@ -34,7 +35,11 @@ export function RepoConnector() {
 
     try {
       const url = repoUrl.trim();
-      const ctx = await api.repo.fetchContext(url) as RepoContext;
+      const token = gitlabToken.trim();
+      if (/gitlab/i.test(url) && token) {
+        setGitlabToken(token);
+      }
+      const ctx = await api.repo.fetchContext(url, token || undefined) as RepoContext;
       setRepoContext(ctx);
       setRepoUrl('');
       api.automation.saveRepoUrl(url).catch(() => {});
@@ -50,7 +55,9 @@ export function RepoConnector() {
     setLoading(true);
     setError(null);
     try {
-      const url = `https://${repoContext.info.provider === 'github' ? 'github.com' : 'gitlab.com'}/${repoContext.info.owner}/${repoContext.info.repo}`;
+      const host = repoContext.info.host
+        || (repoContext.info.provider === 'github' ? 'github.com' : 'gitlab.com');
+      const url = `https://${host}/${repoContext.info.owner}/${repoContext.info.repo}`;
       const ctx = await api.repo.fetchContext(url) as RepoContext;
       setRepoContext(ctx);
     } catch (err: any) {
@@ -149,6 +156,19 @@ export function RepoConnector() {
           Connect
         </Button>
       </div>
+      {/gitlab/i.test(repoUrl) && (
+        <div className="mt-2">
+          <Input
+            aria-label="GitLab token"
+            label="GitLab token"
+            isSecret
+            placeholder="glpat-... (not glft- feed token)"
+            value={gitlabToken}
+            onChange={(e) => setGitlabTokenInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
+          />
+        </div>
+      )}
       {error && (
         <p role="alert" className="text-xs text-red-600 mt-2">{error}</p>
       )}

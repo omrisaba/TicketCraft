@@ -1,8 +1,8 @@
 import type { Ticket, TicketChanges, LinkedTicket, JiraProject, JiraIssueType, JiraUser, BatchCreateResponse } from 'ticketcraft-shared';
 import type { IssueTracker, UserInfo } from '../interfaces/IssueTracker.js';
 import { AppError } from '../../middleware/errorHandler.js';
-import { markdownToAdf } from 'marklassian';
 import TurndownService from 'turndown';
+import { markdownToJiraAdf } from './adf.js';
 
 export class JiraClient implements IssueTracker {
   private baseUrl: string;
@@ -146,7 +146,7 @@ export class JiraClient implements IssueTracker {
       if (ac) {
         fullDescription += `\n\n## Acceptance Criteria\n\n${ac}`;
       }
-      if (fullDescription) {
+      if (fullDescription.trim()) {
         updateFields.description = this.textToAdf(fullDescription);
       }
     }
@@ -211,7 +211,7 @@ export class JiraClient implements IssueTracker {
     if (opts.changes.acceptanceCriteria) {
       fullDescription += `\n\n## Acceptance Criteria\n\n${opts.changes.acceptanceCriteria}`;
     }
-    if (fullDescription) {
+    if (fullDescription.trim()) {
       fields.description = this.textToAdf(fullDescription);
     }
 
@@ -461,6 +461,6 @@ export class JiraClient implements IssueTracker {
   }
 
   private textToAdf(text: string): any {
-    return markdownToAdf(text);
+    return markdownToJiraAdf(text);
   }
 }

@@ -322,10 +322,10 @@ export function SessionStart() {
 
                 <div className="border-t border-gray-200 pt-3 space-y-3">
                   <h2 className="text-lg font-semibold text-gray-800">Repository Tokens
-                    <span className="text-xs font-normal text-gray-400 ml-2">optional</span>
+                    <span className="text-xs font-normal text-gray-400 ml-2">optional for github.com / gitlab.com</span>
                   </h2>
                   <p className="text-xs text-gray-500 -mt-2">
-                    Provide personal access tokens to let the AI fetch deeper context from your repos via MCP.
+                    Required for private repos and self-hosted GitLab (for example gitlab.cee.redhat.com).
                   </p>
                   <Input
                     label="GitHub Token"
@@ -337,7 +337,7 @@ export function SessionStart() {
                   <Input
                     label="GitLab Token"
                     isSecret
-                    placeholder="glpat-..."
+                    placeholder="glpat-... (not a feed token)"
                     value={gitlabToken}
                     onChange={(e) => setGitlabToken(e.target.value)}
                   />

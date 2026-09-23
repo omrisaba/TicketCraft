@@ -30,11 +30,11 @@ export class RepoCloneStore {
     repoUrl: string,
     token?: string,
   ): Promise<CloneResult> {
-    const { provider, owner, repo } = RepoService.parseRepoUrl(repoUrl);
+    const { provider, host, owner, repo } = RepoService.parseRepoUrl(repoUrl);
     const tokenFingerprint = token
       ? createHash('sha256').update(token).digest('hex').slice(0, 8)
       : 'anon';
-    const key = `${provider}_${createHash('sha256').update(`${owner}/${repo}:${tokenFingerprint}`).digest('hex').slice(0, 16)}`;
+    const key = `${provider}_${createHash('sha256').update(`${host}/${owner}/${repo}:${tokenFingerprint}`).digest('hex').slice(0, 16)}`;
     const repoDir = path.join(REPOS_DIR, key);
 
     const existing = cache.get(key);

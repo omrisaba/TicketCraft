@@ -92,6 +92,7 @@ test('RepoService.parseRepoUrl supports GitLab subgroups with query/hash', { con
   );
   assert.deepEqual(parsed, {
     provider: 'gitlab',
+    host: 'gitlab.com',
     owner: 'desk/trading',
     repo: 'market-data',
   });
@@ -101,6 +102,7 @@ test('RepoService.parseRepoUrl supports SSH clone URLs', { concurrency: false },
   const parsed = RepoService.parseRepoUrl('git@github.com:wall-st/alpha-engine.git');
   assert.deepEqual(parsed, {
     provider: 'github',
+    host: 'github.com',
     owner: 'wall-st',
     repo: 'alpha-engine',
   });
@@ -112,8 +114,33 @@ test('RepoService.parseRepoUrl handles GitLab tree/blob style URLs', { concurren
   );
   assert.deepEqual(parsed, {
     provider: 'gitlab',
+    host: 'gitlab.com',
     owner: 'desk/trading',
     repo: 'market-data',
+  });
+});
+
+test('RepoService.parseRepoUrl supports self-hosted GitLab hosts', { concurrency: false }, () => {
+  const parsed = RepoService.parseRepoUrl(
+    'https://gitlab.cee.redhat.com/ai_tools/uie-mas-hosted',
+  );
+  assert.deepEqual(parsed, {
+    provider: 'gitlab',
+    host: 'gitlab.cee.redhat.com',
+    owner: 'ai_tools',
+    repo: 'uie-mas-hosted',
+  });
+});
+
+test('RepoService.parseRepoUrl supports self-hosted GitLab SSH URLs', { concurrency: false }, () => {
+  const parsed = RepoService.parseRepoUrl(
+    'git@gitlab.cee.redhat.com:ai_tools/uie-mas-hosted.git',
+  );
+  assert.deepEqual(parsed, {
+    provider: 'gitlab',
+    host: 'gitlab.cee.redhat.com',
+    owner: 'ai_tools',
+    repo: 'uie-mas-hosted',
   });
 });
 
@@ -151,6 +178,204 @@ test('RepoService.fetchContext forwards GitHub auth token for private repos', { 
   }
 });
 
+test('RepoService.fetchContext uses self-hosted GitLab API host', { concurrency: false }, async () => {
+  const calledUrls: string[] = [];
+  const restoreFetch = withMockFetch((async (input, init) => {
+    const url = String(input);
+    calledUrls.push(url);
+    const headers = (init?.headers || {}) as Record<string, string>;
+
+    if (url.endsWith('/api/v4/user')) {
+      assert.equal(headers['PRIVATE-TOKEN'], 'glpat_cee_token');
+      assert.equal(headers.Authorization, undefined);
+      return jsonResponse({ id: 1, username: 'osabach' });
+    }
+    if (url.includes('/api/v4/projects/') && !url.includes('/repository/') && !url.includes('/languages')) {
+      return jsonResponse({ id: 42, default_branch: 'main', description: 'hosted mas' });
+    }
+    if (url.includes('/repository/tree')) {
+      return jsonResponse([]);
+    }
+    if (url.includes('/README.md/raw')) {
+      return new Response('# readme', { status: 200, headers: { 'content-type': 'text/plain' } });
+    }
+    if (url.endsWith('/languages')) {
+      return jsonResponse({ TypeScript: 1000 });
+    }
+    return new Response('', { status: 404 });
+  }) as typeof fetch);
+
+  try {
+    const ctx = await RepoService.fetchContext(
+      'https://gitlab.cee.redhat.com/ai_tools/uie-mas-hosted',
+      'glpat_cee_token',
+    );
+    assert.equal(ctx.info.provider, 'gitlab');
+    assert.equal(ctx.info.host, 'gitlab.cee.redhat.com');
+    assert.ok(
+      calledUrls.some((u) => u.startsWith('https://gitlab.cee.redhat.com/api/v4/projects/')),
+      `expected CEE GitLab API calls, got ${calledUrls.join(', ')}`,
+    );
+    assert.equal(
+      calledUrls.some((u) => u.includes('gitlab.com')),
+      false,
+      'must not call gitlab.com for a self-hosted repo',
+    );
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('RepoService.fetchContext falls back to Basic oauth2 when PRIVATE-TOKEN is rejected', { concurrency: false }, async () => {
+  const restoreFetch = withMockFetch((async (_input, init) => {
+    const headers = (init?.headers || {}) as Record<string, string>;
+    if (headers['PRIVATE-TOKEN'] || headers['JOB-TOKEN']) {
+      return new Response(JSON.stringify({ message: '401 Unauthorized' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (headers.Authorization?.startsWith('Basic ')) {
+      const decoded = Buffer.from(headers.Authorization.slice(6), 'base64').toString('utf8');
+      if (decoded === 'oauth2:glpat_basic_style') {
+        const url = String(_input);
+        if (url.endsWith('/api/v4/user')) return jsonResponse({ id: 1, username: 'osabach' });
+        if (url.includes('/repository/tree')) return jsonResponse([]);
+        if (url.includes('/README.md/raw')) {
+          return new Response('# readme', { status: 200, headers: { 'content-type': 'text/plain' } });
+        }
+        if (url.endsWith('/languages')) return jsonResponse({ TypeScript: 1 });
+        return jsonResponse({ id: 42, default_branch: 'main', description: null });
+      }
+    }
+    return new Response(JSON.stringify({ message: '401 Unauthorized' }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as typeof fetch);
+
+  try {
+    const ctx = await RepoService.fetchContext(
+      'https://gitlab.cee.redhat.com/ai_tools/uie-mas-hosted',
+      'glpat_basic_style',
+    );
+    assert.equal(ctx.info.host, 'gitlab.cee.redhat.com');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('RepoService.fetchContext falls back to Bearer when PRIVATE-TOKEN is rejected', { concurrency: false }, async () => {
+  const restoreFetch = withMockFetch((async (_input, init) => {
+    const headers = (init?.headers || {}) as Record<string, string>;
+    if (headers['PRIVATE-TOKEN']) {
+      return new Response(JSON.stringify({ message: '401 Unauthorized' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (headers.Authorization === 'Bearer glpat_oauth_style') {
+      const url = String(_input);
+      if (url.endsWith('/api/v4/user')) return jsonResponse({ id: 1, username: 'osabach' });
+      if (url.includes('/repository/tree')) return jsonResponse([]);
+      if (url.includes('/README.md/raw')) {
+        return new Response('# readme', { status: 200, headers: { 'content-type': 'text/plain' } });
+      }
+      if (url.endsWith('/languages')) return jsonResponse({ TypeScript: 1 });
+      return jsonResponse({ id: 42, default_branch: 'main', description: null });
+    }
+    return new Response(JSON.stringify({ message: '401 Unauthorized' }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as typeof fetch);
+
+  try {
+    const ctx = await RepoService.fetchContext(
+      'https://gitlab.cee.redhat.com/ai_tools/uie-mas-hosted',
+      'glpat_oauth_style',
+    );
+    assert.equal(ctx.info.host, 'gitlab.cee.redhat.com');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('RepoService.fetchContext uses GitLab search when encoded project path is rejected', { concurrency: false }, async () => {
+  const restoreFetch = withMockFetch((async (input, init) => {
+    const url = String(input);
+    const headers = (init?.headers || {}) as Record<string, string>;
+    if (!headers['PRIVATE-TOKEN']) {
+      return new Response(JSON.stringify({ message: '401 Unauthorized' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.endsWith('/api/v4/user')) {
+      return jsonResponse({ id: 1, username: 'osabach' });
+    }
+    if (url.includes('/projects/ai_tools%2Fuie-mas-hosted')) {
+      return new Response(JSON.stringify({ message: '401 Unauthorized' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.includes('/api/v4/projects?search=')) {
+      return jsonResponse([
+        { id: 99, path: 'uie-mas-hosted', path_with_namespace: 'ai_tools/uie-mas-hosted', default_branch: 'main' },
+      ]);
+    }
+    if (url.endsWith('/api/v4/projects/99')) {
+      return jsonResponse({ id: 99, default_branch: 'main', description: 'hosted' });
+    }
+    if (url.includes('/repository/tree')) return jsonResponse([]);
+    if (url.includes('/README.md/raw')) {
+      return new Response('# readme', { status: 200, headers: { 'content-type': 'text/plain' } });
+    }
+    if (url.endsWith('/languages')) return jsonResponse({ TypeScript: 1 });
+    return new Response('', { status: 404 });
+  }) as typeof fetch);
+
+  try {
+    const ctx = await RepoService.fetchContext(
+      'https://gitlab.cee.redhat.com/ai_tools/uie-mas-hosted',
+      'glpat_cee_token',
+    );
+    assert.equal(ctx.info.repo, 'uie-mas-hosted');
+    assert.equal(ctx.info.host, 'gitlab.cee.redhat.com');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('RepoService.fetchContext rejects GitLab feed tokens', { concurrency: false }, async () => {
+  await assert.rejects(
+    () => RepoService.fetchContext(
+      'https://gitlab.cee.redhat.com/ai_tools/uie-mas-hosted',
+      'glft-xxxxxxxxxxxxxxxxxxxx',
+    ),
+    (err: unknown) => {
+      const e = err as { code?: string; message?: string };
+      assert.equal(e.code, 'REPO_AUTH_FAILED');
+      assert.match(e.message ?? '', /feed token/i);
+      return true;
+    },
+  );
+});
+
+test('RepoService.fetchContext requires a token for self-hosted GitLab', { concurrency: false }, async () => {
+  await assert.rejects(
+    () => RepoService.fetchContext('https://gitlab.cee.redhat.com/ai_tools/uie-mas-hosted'),
+    (err: unknown) => {
+      const e = err as { code?: string; statusCode?: number; message?: string };
+      assert.equal(e.code, 'REPO_AUTH_FAILED');
+      assert.equal(e.statusCode, 401);
+      assert.match(e.message ?? '', /token is required/i);
+      return true;
+    },
+  );
+});
+
 test('RepoController forwards credential token into RepoService.fetchContext', { concurrency: false }, async () => {
   const controller = new RepoController();
   const originalFetchContext = RepoService.fetchContext;
@@ -163,6 +388,7 @@ test('RepoController forwards credential token into RepoService.fetchContext', {
     return {
       info: {
         provider: 'github',
+        host: 'github.com',
         owner: 'wall-st',
         repo: 'alpha-engine',
         defaultBranch: 'main',
@@ -229,6 +455,46 @@ test('RepoController converts GitLab subgroup blob URL to raw API URL', { concur
     assert.equal(
       calledUrls[0],
       'https://gitlab.com/api/v4/projects/desk%2Ftrading%2Fmarket-data/repository/files/src%2Findex.ts/raw?ref=main',
+    );
+    assert.ok(
+      (jsonPayload as { success: boolean }).success,
+      'expected successful JSON response',
+    );
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('RepoController converts self-hosted GitLab blob URL to that host API', { concurrency: false }, async () => {
+  const controller = new RepoController();
+  const calledUrls: string[] = [];
+  const restoreFetch = withMockFetch((async (input) => {
+    calledUrls.push(String(input));
+    return new Response('hello world', {
+      status: 200,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+  }) as typeof fetch);
+
+  let jsonPayload: unknown;
+  let nextErr: unknown;
+  try {
+    await controller.fetchUrls(
+      {
+        body: {
+          urls: ['https://gitlab.cee.redhat.com/ai_tools/uie-mas-hosted/-/blob/main/README.md'],
+        },
+      } as never,
+      {
+        json: (payload: unknown) => { jsonPayload = payload; },
+      } as never,
+      (err?: unknown) => { nextErr = err; },
+    );
+
+    assert.equal(nextErr, undefined);
+    assert.equal(
+      calledUrls[0],
+      'https://gitlab.cee.redhat.com/api/v4/projects/ai_tools%2Fuie-mas-hosted/repository/files/README.md/raw?ref=main',
     );
     assert.ok(
       (jsonPayload as { success: boolean }).success,
@@ -551,6 +817,10 @@ test('RepoCloneStore.buildAuthUrl produces token-bearing URLs', { concurrency: f
 
   const gl = buildUrl('https://gitlab.com/group/repo.git', 'gitlab', 'tok456');
   assert.ok(gl.includes('tok456'), 'GitLab URL should embed the token');
+
+  const cee = buildUrl('https://gitlab.cee.redhat.com/ai_tools/uie-mas-hosted.git', 'gitlab', 'tok789');
+  assert.ok(cee.includes('tok789'), 'Self-hosted GitLab URL should embed the token');
+  assert.ok(cee.includes('gitlab.cee.redhat.com'), 'Self-hosted GitLab host must be preserved');
 
   const noToken = buildUrl('https://github.com/owner/repo.git', 'github');
   assert.equal(noToken, 'https://github.com/owner/repo.git', 'No token should return original URL');
@@ -1171,3 +1441,113 @@ test('validateApiKey maps network failure to GEMINI_UNAVAILABLE', { concurrency:
     restoreFetch();
   }
 });
+
+function collectAdfTypes(node: { type?: string; content?: unknown[] }, types = new Set<string>()): Set<string> {
+  if (node?.type) types.add(node.type);
+  if (Array.isArray(node?.content)) {
+    for (const child of node.content) {
+      collectAdfTypes(child as { type?: string; content?: unknown[] }, types);
+    }
+  }
+  return types;
+}
+
+test('markdownToJiraAdf converts checkbox lists instead of emitting taskList', { concurrency: false }, async () => {
+  const { markdownToJiraAdf } = await import('./server/src/services/jira/adf.ts');
+  const doc = markdownToJiraAdf('- [ ] one\n- [x] two\n');
+  const types = collectAdfTypes(doc);
+  assert.equal(doc.type, 'doc');
+  assert.equal(doc.version, 1);
+  assert.ok(doc.content.length > 0, 'doc must have content');
+  assert.equal(types.has('taskList'), false, 'Jira descriptions reject taskList');
+  assert.equal(types.has('taskItem'), false, 'Jira descriptions reject taskItem');
+  assert.equal(types.has('bulletList'), true);
+  const texts: string[] = [];
+  JSON.stringify(doc, (_k, v) => {
+    if (v && v.type === 'text' && typeof v.text === 'string') texts.push(v.text);
+    return v;
+  });
+  assert.ok(texts.includes('one'));
+  assert.ok(texts.includes('two'));
+});
+
+test('markdownToJiraAdf strips illegal codeBlock languages and media nodes', { concurrency: false }, async () => {
+  const { markdownToJiraAdf } = await import('./server/src/services/jira/adf.ts');
+  const doc = markdownToJiraAdf(
+    'Hello\n\n```\nconst x = 1;\n```\n\n```mermaid\ngraph TD; A-->B;\n```\n\nSee ![alt](https://example.com/a.png)\n',
+  );
+  const types = collectAdfTypes(doc);
+  assert.equal(types.has('mediaSingle'), false);
+  assert.equal(types.has('media'), false);
+  const codeBlocks: { attrs?: { language?: string }; content?: { text?: string }[] }[] = [];
+  JSON.stringify(doc, (_k, v) => {
+    if (v && v.type === 'codeBlock') codeBlocks.push(v);
+    return v;
+  });
+  assert.equal(codeBlocks.length, 2);
+  for (const block of codeBlocks) {
+    assert.equal(block.attrs?.language, undefined, 'unknown/text/mermaid languages must be omitted');
+    assert.ok(block.content?.[0]?.text, 'codeBlock must contain text');
+  }
+  const texts: string[] = [];
+  JSON.stringify(doc, (_k, v) => {
+    if (v && v.type === 'text' && typeof v.text === 'string') texts.push(v.text);
+    return v;
+  });
+  assert.ok(texts.some((t) => t.includes('example.com/a.png') || t === 'alt'));
+});
+
+test('markdownToJiraAdf drops empty headings and keeps following paragraphs', { concurrency: false }, async () => {
+  const { markdownToJiraAdf } = await import('./server/src/services/jira/adf.ts');
+  const doc = markdownToJiraAdf('# \n\npara');
+  const types = collectAdfTypes(doc);
+  assert.equal(types.has('heading'), false);
+  assert.equal(doc.content[0]?.type, 'paragraph');
+  assert.equal(doc.content[0]?.content?.[0]?.text, 'para');
+});
+
+test('markdownToJiraAdf falls back to a plain paragraph when conversion yields no content', { concurrency: false }, async () => {
+  const { markdownToJiraAdf } = await import('./server/src/services/jira/adf.ts');
+  const doc = markdownToJiraAdf('   ');
+  assert.equal(doc.type, 'doc');
+  assert.equal(doc.version, 1);
+  assert.equal(doc.content.length, 1);
+  assert.equal(doc.content[0].type, 'paragraph');
+  assert.ok(doc.content[0].content?.some((n: { type?: string; text?: string }) => n.type === 'text' && (n.text?.length ?? 0) > 0));
+});
+
+test('JiraClient.createTicket sends sanitized ADF for Gemini-style markdown', { concurrency: false }, async () => {
+  let sentBody: any = null;
+  const restoreFetch = withMockFetch((async (input, init) => {
+    const url = String(input);
+    if (url.includes('/rest/api/3/issue') && init?.method === 'POST') {
+      sentBody = JSON.parse(init.body as string);
+      return jsonResponse({ key: 'TEST-9', id: '9' });
+    }
+    return new Response('', { status: 404 });
+  }) as typeof fetch);
+
+  try {
+    const { JiraClient } = await import('./server/src/services/jira/JiraClient.ts');
+    const client = new JiraClient('https://jira.test', 'user@test.com', 'token');
+    await client.createTicket({
+      projectKey: 'TEST',
+      issueType: 'Story',
+      changes: {
+        summary: 'ADF sanitization',
+        description: '## Goal\n\n- [ ] accept the ticket\n- [x] done already\n\n```\ncode\n```\n',
+        acceptanceCriteria: '- [ ] criterion one',
+      },
+    });
+    assert.ok(sentBody?.fields?.description, 'description ADF should be sent');
+    const types = collectAdfTypes(sentBody.fields.description);
+    assert.equal(types.has('taskList'), false);
+    assert.equal(types.has('taskItem'), false);
+    assert.equal(sentBody.fields.description.type, 'doc');
+    assert.equal(sentBody.fields.description.version, 1);
+    assert.ok(sentBody.fields.description.content.length > 0);
+  } finally {
+    restoreFetch();
+  }
+});
+

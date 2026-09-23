@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import type { SessionCredentials, GeminiModel, HistoryEntry, AppConfig, RepoContext } from 'ticketcraft-shared';
-import { api, updateApiModel, updateApiTemperature, clearApiCredentials } from '../services/apiClient';
+import { api, updateApiModel, updateApiTemperature, updateApiGitlabToken, clearApiCredentials } from '../services/apiClient';
 
 interface JiraUser {
   displayName: string;
@@ -24,6 +24,7 @@ interface SessionContextValue extends SessionState {
   endSession: () => void;
   setAppConfig: (config: AppConfig) => void;
   setGeminiModel: (model: GeminiModel) => void;
+  setGitlabToken: (token: string) => void;
   addHistoryEntry: (entry: HistoryEntry) => void;
   updateHistoryEntry: (ticketKey: string, update: Partial<HistoryEntry>) => void;
   setRepoContext: (ctx: RepoContext | null) => void;
@@ -140,6 +141,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const setGitlabToken = useCallback((token: string) => {
+    updateApiGitlabToken(token);
+    setState((prev) => ({
+      ...prev,
+      credentials: prev.credentials
+        ? { ...prev.credentials, gitlabToken: token.trim() || undefined }
+        : null,
+    }));
+  }, []);
+
   const setRepoContext = useCallback((ctx: RepoContext | null) => {
     setState((prev) => ({ ...prev, repoContext: ctx }));
   }, []);
@@ -151,7 +162,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   return (
     <SessionContext.Provider
-      value={{ ...state, startSession, endSession, setAppConfig, setGeminiModel, addHistoryEntry, updateHistoryEntry, setRepoContext, setGeminiTemperature, sessionWarning }}
+      value={{ ...state, startSession, endSession, setAppConfig, setGeminiModel, setGitlabToken, addHistoryEntry, updateHistoryEntry, setRepoContext, setGeminiTemperature, sessionWarning }}
     >
       {children}
     </SessionContext.Provider>

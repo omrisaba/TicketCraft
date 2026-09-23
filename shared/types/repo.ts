@@ -2,6 +2,7 @@ export type RepoProvider = 'github' | 'gitlab';
 
 export interface RepoInfo {
   provider: RepoProvider;
+  host: string;
   owner: string;
   repo: string;
   defaultBranch: string;

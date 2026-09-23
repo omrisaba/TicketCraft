@@ -31,6 +31,16 @@ export function updateApiModel(model: string) {
   }
 }
 
+export function updateApiGitlabToken(token: string) {
+  if (currentCredentials) {
+    const trimmed = token.trim();
+    currentCredentials = {
+      ...currentCredentials,
+      gitlabToken: trimmed || undefined,
+    };
+  }
+}
+
 let currentTemperature = 0.3;
 
 export function updateApiTemperature(temp: number) {
@@ -292,8 +302,14 @@ export const api = {
   },
 
   repo: {
-    fetchContext: (repoUrl: string) =>
-      request('/api/repo/context', { method: 'POST', body: JSON.stringify({ repoUrl }) }),
+    fetchContext: (repoUrl: string, gitlabToken?: string) =>
+      request('/api/repo/context', {
+        method: 'POST',
+        body: JSON.stringify({
+          repoUrl,
+          ...(gitlabToken?.trim() && { gitlabToken: gitlabToken.trim() }),
+        }),
+      }),
     fetchUrls: (urls: string[]) =>
       request('/api/repo/fetch-urls', { method: 'POST', body: JSON.stringify({ urls }) }),
     uploadFiles: async (files: File[]) => {
